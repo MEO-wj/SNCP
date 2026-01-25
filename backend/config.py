@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+import os
+from datetime import timedelta
+from pathlib import Path
+from typing import Optional
+
+
+class Config:
+    """后端配置加载器（仅包含后端所需字段）。"""
+
+    def __init__(self, env_file: str | Path | None = None) -> None:
+        self.project_root = Path(__file__).resolve().parents[1]
+        default_env = Path(__file__).resolve().parent / ".env"
+        self.env_file = self._resolve_path(env_file) if env_file else default_env
+
+        # 默认值
+        self.database_url: Optional[str] = None
+        self.auth_access_token_ttl: timedelta = timedelta(days=7)
+        self.auth_refresh_token_ttl: timedelta = timedelta(days=7)
+        self.auth_jwt_secret: Optional[str] = None
+        self.auth_password_cost: int = 12
+        self.auth_refresh_hash_key: Optional[str] = None
+        self.admin_phones: list[str] = []
+        self.redis_host: str = "localhost"
+        self.redis_port: int = 6379
+        self.redis_db: int = 0
+        self.redis_password: Optional[str] = None
+        self.cors_allow_origins: list[str] = ["*"]
+        self.rate_limit_per_day: Optional[int] = None
+        self.rate_limit_per_hour: Optional[int] = None
+        # AI（用于食物识别、营养分析、推荐）
+        self.ai_food_recognition_url: Optional[str] = None
+        self.ai_food_recognition_key: Optional[str] = None
+        self.ai_nutrition_analysis_url: Optional[str] = None
+        self.ai_nutrition_analysis_key: Optional[str] = None
+        self.ai_recipe_recommend_url: Optional[str] = None
+        self.ai_recipe_recommend_key: Optional[str] = None
+
+        self.load()
+
+    # 加载逻辑
+    def load(self) -> None:
+        self._load_from_env_file()
+        self._override_with_environment()
+
+    def _resolve_path(self, value: str | Path) -> Path:
+        path = Path(value)
+        if path.is_absolute():
+            return path
+        return (self.project_root / path).resolve()
+
+    def _load_from_env_file(self) -> None:
+        if not self.env_file.exists():
+            return
+        try:
+            for raw in self.env_file.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, raw_value = line.split("=", 1)
+                self._apply_setting(key.strip().upper(), raw_value.strip())
+        except OSError as exc:
+            raise RuntimeError(f"无法读取配置文件: {self.env_file}") from exc
+
+    def _override_with_environment(self) -> None:
+        keys = [
+            "DATABASE_URL",
+            "AUTH_ACCESS_TOKEN_TTL",
+            "AUTH_REFRESH_TOKEN_TTL",
+            "AUTH_JWT_SECRET",
+            "AUTH_PASSWORD_COST",
+            "AUTH_REFRESH_HASH_KEY",
+            "ADMIN_PHONES",
+            "REDIS_HOST",
+            "REDIS_PORT",
+            "REDIS_DB",
+            "REDIS_PASSWORD",
+            "CORS_ALLOW_ORIGINS",
+            "RATE_LIMIT_PER_DAY",
+            "RATE_LIMIT_PER_HOUR",
+            "AI_FOOD_RECOGNITION_URL",
+            "AI_FOOD_RECOGNITION_KEY",
+            "AI_NUTRITION_ANALYSIS_URL",
+            "AI_NUTRITION_ANALYSIS_KEY",
+            "AI_RECIPE_RECOMMEND_URL",
+            "AI_RECIPE_RECOMMEND_KEY",
+        ]
+        for key in keys:
+            value = os.getenv(key)
+            if value is not None and value != "":
+                self._apply_setting(key, value)
+
+    def _apply_setting(self, key: str, raw_value: str) -> None:
+        value = raw_value.strip()
+        if key == "DATABASE_URL":
+            self.database_url = value or None
+        elif key == "AUTH_ACCESS_TOKEN_TTL":
+            self.auth_access_token_ttl = self._parse_ttl(value, fallback=self.auth_access_token_ttl)
+        elif key == "AUTH_REFRESH_TOKEN_TTL":
+            self.auth_refresh_token_ttl = self._parse_ttl(value, fallback=self.auth_refresh_token_ttl)
+        elif key == "AUTH_JWT_SECRET":
+            self.auth_jwt_secret = value or None
+        elif key == "AUTH_PASSWORD_COST":
+            try:
+                self.auth_password_cost = int(value)
+            except ValueError:
+                pass
+        elif key == "AUTH_REFRESH_HASH_KEY":
+            self.auth_refresh_hash_key = value or None
+        elif key == "ADMIN_PHONES":
+            self.admin_phones = [part.strip() for part in value.split(",") if part.strip()]
+        elif key == "REDIS_HOST":
+            self.redis_host = value
+        elif key == "REDIS_PORT":
+            try:
+                self.redis_port = int(value)
+            except ValueError:
+                pass
+        elif key == "REDIS_DB":
+            try:
+                self.redis_db = int(value)
+            except ValueError:
+                pass
+        elif key == "REDIS_PASSWORD":
+            self.redis_password = value or None
+        elif key == "CORS_ALLOW_ORIGINS":
+            self.cors_allow_origins = [part.strip() for part in value.split(",") if part.strip()]
+        elif key == "RATE_LIMIT_PER_DAY":
+            try:
+                limit = int(value)
+                self.rate_limit_per_day = limit if limit > 0 else None
+            except ValueError:
+                pass
+        elif key == "RATE_LIMIT_PER_HOUR":
+            try:
+                limit = int(value)
+                self.rate_limit_per_hour = limit if limit > 0 else None
+            except ValueError:
+                pass
+        elif key == "AI_FOOD_RECOGNITION_URL":
+            self.ai_food_recognition_url = value or None
+        elif key == "AI_FOOD_RECOGNITION_KEY":
+            self.ai_food_recognition_key = value or None
+        elif key == "AI_NUTRITION_ANALYSIS_URL":
+            self.ai_nutrition_analysis_url = value or None
+        elif key == "AI_NUTRITION_ANALYSIS_KEY":
+            self.ai_nutrition_analysis_key = value or None
+        elif key == "AI_RECIPE_RECOMMEND_URL":
+            self.ai_recipe_recommend_url = value or None
+        elif key == "AI_RECIPE_RECOMMEND_KEY":
+            self.ai_recipe_recommend_key = value or None
+
+    @staticmethod
+    def _parse_ttl(raw: str, fallback: timedelta) -> timedelta:
+        try:
+            seconds = int(raw)
+            return timedelta(seconds=seconds)
+        except ValueError:
+            return fallback
+
+
+__all__ = ["Config"]
