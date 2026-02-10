@@ -151,7 +151,7 @@ export default function LoginScreen() {
             </Pressable>
             {!!error && <Text style={styles.errorText}>{error}</Text>}
 
-            <Pressable style={styles.linkRow} onPress={() => router.push('/register')}>
+            <Pressable style={styles.linkRow} onPress={() => router.push({ pathname: '/register' })}>
               <Text style={styles.linkText}>没有账号？去注册</Text>
             </Pressable>
           </View>

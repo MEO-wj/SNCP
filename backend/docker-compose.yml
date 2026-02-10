@@ -1,11 +1,33 @@
-
 services:
+  db:
+    image: postgres:16
+    container_name: sncp-db
+    environment:
+      POSTGRES_DB: sncp
+      POSTGRES_USER: sncp
+      POSTGRES_PASSWORD: change-me-db-password
+    volumes:
+      - sncp_db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: sncp-redis
+    restart: unless-stopped
+
   backend:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: sncp-backend
     env_file:
       - .env
+    depends_on:
+      - db
+      - redis
     ports:
       - "4420:4420"
     restart: unless-stopped
+
+volumes:
+  sncp_db_data:

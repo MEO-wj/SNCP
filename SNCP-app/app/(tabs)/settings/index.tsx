@@ -11,6 +11,7 @@ import { usePalette } from '@/hooks/use-palette';
 import { useUserProfile } from '@/hooks/use-user-profile';
 import { setAuthToken } from '@/hooks/use-auth-token';
 import { clearAuthStorage } from '@/storage/auth-storage';
+import { getThemePreference, setThemePreference as saveThemePreference, type ThemePreference } from '@/storage/theme-storage';
 import { fetchGoals, fetchProfile, updateGoals, updateProfile } from '@/services/profile';
 import type { HealthProfile, NutritionGoals } from '@/types/profile';
 
@@ -25,6 +26,7 @@ export default function SettingsScreen() {
   const [profile, setProfile] = useState<HealthProfile>({});
   const [goals, setGoals] = useState<NutritionGoals>({});
   const [saving, setSaving] = useState(false);
+  const [themePreference, setThemePreference] = useState<ThemePreference>('system');
 
   useEffect(() => {
     if (!token) {
@@ -37,6 +39,29 @@ export default function SettingsScreen() {
       .then((res) => setGoals(res.goals || {}))
       .catch(() => {});
   }, [token]);
+
+  useEffect(() => {
+    let mounted = true;
+    void getThemePreference().then((nextPreference) => {
+      if (mounted) {
+        setThemePreference(nextPreference);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleThemeChange = (preference: ThemePreference) => {
+    setThemePreference(preference);
+    void saveThemePreference(preference);
+  };
+
+  const themeOptions: Array<{ value: ThemePreference; label: string }> = [
+    { value: 'system', label: '跟随系统' },
+    { value: 'light', label: '日间' },
+    { value: 'dark', label: '夜间' },
+  ];
 
   const handleSave = async () => {
     if (!token) {
@@ -199,6 +224,26 @@ export default function SettingsScreen() {
         </Pressable>
 
         <View style={styles.card}>
+          <Text style={styles.cardTitle}>日夜间模式</Text>
+          <View style={styles.themeRow}>
+            {themeOptions.map((option) => {
+              const isActive = themePreference === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  style={[styles.themeButton, isActive && styles.themeButtonActive]}
+                  onPress={() => handleThemeChange(option.value)}
+                >
+                  <Text style={[styles.themeButtonText, isActive && styles.themeButtonTextActive]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        <View style={styles.card}>
           <Text style={styles.cardTitle}>功能入口</Text>
           <Pressable style={styles.linkButton} onPress={() => router.push('/reminders')}>
             <Text style={styles.linkButtonText}>提醒设置</Text>
@@ -301,6 +346,33 @@ function createStyles(palette: Palette) {
       color: palette.gold50,
       fontSize: 16,
       fontWeight: '700',
+    },
+    themeRow: {
+      flexDirection: 'row',
+      gap: 8,
+      padding: 6,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: palette.stone100,
+      backgroundColor: palette.surfaceWarm,
+    },
+    themeButton: {
+      flex: 1,
+      borderRadius: 999,
+      paddingVertical: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    themeButtonActive: {
+      backgroundColor: palette.stone900,
+    },
+    themeButtonText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: palette.stone600,
+    },
+    themeButtonTextActive: {
+      color: palette.white,
     },
     linkButton: {
       backgroundColor: palette.surfaceWarm,

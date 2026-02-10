@@ -68,5 +68,5 @@ npm run start
 
 ## 📄 许可证
 
-版权所有 © 2024 [24计科陈子俊](https://github.com/HandyWote)
+版权所有 © 2024 [陈子俊](https://github.com/HandyWote)
 本项目采用非商业许可证，仅允许学习与研究用途。
