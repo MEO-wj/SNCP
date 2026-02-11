@@ -215,6 +215,26 @@ class UserRepository:
             )
             conn.commit()
 
+    def update_display_name(self, user_id: UUID, display_name: str) -> User:
+        now = datetime.now(timezone.utc)
+        with db_session() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE users
+                SET display_name = %s,
+                    updated_at = %s
+                WHERE id = %s
+                RETURNING id, phone, display_name, password_hash, password_algo, password_cost,
+                          roles, created_at, updated_at, last_login_at
+                """,
+                (display_name, now, user_id),
+            )
+            row = cur.fetchone()
+            conn.commit()
+        if not row:
+            raise NotFoundError("user not found")
+        return self._row_to_user(row)
+
     def _row_to_user(self, row: dict) -> User:
         return User(
             id=row["id"],

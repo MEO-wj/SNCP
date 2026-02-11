@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Callable
+from uuid import UUID
 
 from flask import Blueprint, jsonify, request
 
-from backend.repository.user_repository import UserRepository
+from backend.repository.user_repository import NotFoundError, UserRepository
 from backend.services.auth_service import AuthMetadata, AuthService
 from backend.services.exceptions import InvalidCredentialsError, UnauthorizedError, ValidationError
 from backend.config import Config
@@ -177,13 +178,58 @@ def logout():
 @login_required
 def get_me():
     claims = getattr(request, "auth_claims", {})
+    user_id = claims.get("sub")
+    if not user_id:
+        return jsonify({"error": "未授权访问"}), 401
+
+    try:
+        user = user_repo.get_by_id(UUID(str(user_id)))
+    except (ValueError, NotFoundError):
+        return jsonify({"error": "用户不存在"}), 404
+
     return (
         jsonify(
             {
-                "user_id": claims.get("sub"),
-                "display_name": claims.get("name"),
-                "phone": claims.get("phone"),
-                "roles": claims.get("roles", []),
+                "user_id": str(user.id),
+                "display_name": user.display_name,
+                "phone": user.phone,
+                "roles": user.roles,
+            }
+        ),
+        200,
+    )
+
+
+@bp.route("/me", methods=["PUT"])
+@login_required
+def update_me():
+    claims = getattr(request, "auth_claims", {})
+    user_id = claims.get("sub")
+    if not user_id:
+        return jsonify({"error": "未授权访问"}), 401
+
+    data = request.get_json(silent=True) or {}
+    display_name = data.get("display_name")
+
+    try:
+        user = auth_service.update_profile(UUID(str(user_id)), display_name)
+    except ValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except (ValueError, NotFoundError):
+        return jsonify({"error": "用户不存在"}), 404
+    except Exception as exc:  # pragma: no cover
+        logger.exception("update me failed")
+        return jsonify({"error": f"更新失败: {exc}"}), 500
+
+    return (
+        jsonify(
+            {
+                "user": {
+                    "id": str(user.id),
+                    "phone": user.phone,
+                    "display_name": user.display_name,
+                    "roles": user.roles,
+                }
             }
         ),
         200,

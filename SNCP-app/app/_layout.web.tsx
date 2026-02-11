@@ -31,7 +31,7 @@ export default function RootLayout() {
       meta.content = content;
     };
 
-    setMeta('description', '面向中老年与慢病人群的饮食记录、营养分析与个性化推荐助手。');
+    setMeta('description', '面向中老年与慢性病人群的饮食记录、营养分析与个性化推荐助手。');
     setMeta('keywords', '膳食记录,营养分析,健康提醒,食谱推荐,适老化');
 
     // iOS Web Clip（添加到主屏幕后全屏打开）

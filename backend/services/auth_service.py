@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from typing import Any
 from uuid import UUID, uuid4
+from typing import Optional
 
 import bcrypt
 import jwt
@@ -122,6 +123,14 @@ class AuthService:
 
         self.repo.revoke_session(session.id)
         return self._issue_tokens(user, meta)
+
+    def update_profile(self, user_id: UUID, display_name: str | None = None) -> User:
+        normalized_name = (display_name or "").strip()
+        if not normalized_name:
+            raise ValidationError("昵称不能为空")
+        if len(normalized_name) > 30:
+            raise ValidationError("昵称长度不能超过30个字符")
+        return self.repo.update_display_name(user_id, normalized_name)
 
     def logout(self, refresh_token: str) -> None:
         token = (refresh_token or "").strip()

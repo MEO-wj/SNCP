@@ -10,7 +10,7 @@ export default function Html({ children }: PropsWithChildren) {
         <title>柠芯食伴 - 膳食营养助手</title>
         <meta
           name="description"
-          content="面向中老年与慢病人群的饮食记录、营养分析与个性化推荐助手。"
+          content="面向中老年与慢性病人群的饮食记录、营养分析与个性化推荐助手。"
         />
         <meta name="keywords" content="膳食记录,营养分析,健康提醒,食谱推荐,适老化" />
 

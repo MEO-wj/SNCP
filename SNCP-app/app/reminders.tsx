@@ -3,7 +3,8 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
-import { colors, Palette } from '@/constants/palette';
+import { AmbientBackground } from '@/components/ambient-background';
+import { Palette } from '@/constants/palette';
 import { useAuthToken } from '@/hooks/use-auth-token';
 import { usePalette } from '@/hooks/use-palette';
 import { createReminder, fetchReminders } from '@/services/reminders';
@@ -57,6 +58,7 @@ export default function RemindersScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <AmbientBackground variant="home" />
       <ScrollView contentContainerStyle={styles.content}>
         <Pressable onPress={() => router.back()}>
           <Text style={styles.backText}>返回</Text>
@@ -103,11 +105,12 @@ function createStyles(palette: Palette) {
   return StyleSheet.create({
     safeArea: {
       flex: 1,
-      backgroundColor: colors.surface,
+      backgroundColor: palette.surface,
     },
     content: {
       padding: 20,
       gap: 16,
+      flexGrow: 1,
     },
     backText: {
       color: palette.blue500,
