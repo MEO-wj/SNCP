@@ -29,8 +29,9 @@ export function TopBar({
   actions,
 }: TopBarProps) {
   const colorScheme = useColorScheme() ?? 'light';
+  const isDark = colorScheme === 'dark';
   const palette = usePalette();
-  const styles = useMemo(() => createStyles(palette), [palette]);
+  const styles = useMemo(() => createStyles(palette, isDark), [isDark, palette]);
 
   if (variant === 'home') {
     return (
@@ -88,7 +89,7 @@ export function TopBar({
 const HOME_TOP_PADDING = 18;
 const EXPLORE_TOP_PADDING = 44;
 
-function createStyles(colors: Palette) {
+function createStyles(colors: Palette, isDark: boolean) {
   return StyleSheet.create({
   homeWrap: {
     position: 'absolute',
@@ -110,7 +111,7 @@ function createStyles(colors: Palette) {
     borderRadius: 28,
   },
   homeBarScrolled: {
-    backgroundColor: colors.white,
+    backgroundColor: isDark ? 'rgba(24, 22, 20, 0.92)' : colors.white,
     paddingVertical: 8,
     paddingHorizontal: 8,
   },
@@ -176,11 +177,11 @@ function createStyles(colors: Palette) {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.white,
+    backgroundColor: isDark ? colors.stone100 : colors.white,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.gold100,
+    borderColor: isDark ? colors.stone200 : colors.gold100,
     ...shadows.soft,
   },
   actionRow: {
@@ -197,7 +198,7 @@ function createStyles(colors: Palette) {
     borderRadius: 4,
     backgroundColor: colors.imperial500,
     borderWidth: 1,
-    borderColor: colors.white,
+    borderColor: isDark ? colors.stone100 : colors.white,
   },
   });
 }

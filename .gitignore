@@ -72,3 +72,7 @@ app-example
 
 expo-env.d.ts
 # @end expo-cli
+
+# local architecture artifacts
+docs/technical_architecture.md
+docs/generated/

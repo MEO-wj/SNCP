@@ -1,5 +1,5 @@
 export function getApiBaseUrl() {
-  return process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:4420/api';
+  return process.env.EXPO_PUBLIC_API_BASE_URL || 'http://172.29.14.46:4420/api';
 }
 
 export function buildAuthHeaders(token?: string | null) {

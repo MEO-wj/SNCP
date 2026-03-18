@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from backend.db import db_session
+from psycopg.types.json import Jsonb
 
 
 class MealRepository:
@@ -39,7 +40,7 @@ class MealRepository:
                         item.get("food_category"),
                         item.get("weight_g"),
                         item.get("source"),
-                        item.get("nutrition") or {},
+                        Jsonb(item.get("nutrition") or {}),
                     ),
                 )
             conn.commit()

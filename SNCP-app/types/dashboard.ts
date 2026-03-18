@@ -1,12 +1,6 @@
-export type NutritionTotals = {
-  calories: number;
-  protein: number;
-  fat: number;
-  carbs: number;
-  fiber: number;
-  sodium: number;
-  sugar: number;
-};
+import type { NutritionValues } from '@/types/nutrition';
+
+export type NutritionTotals = NutritionValues;
 
 export type MacroRatio = {
   protein: number;
@@ -19,13 +13,13 @@ export type DashboardData = {
   meal_count: number;
   totals: NutritionTotals;
   macro_ratio: MacroRatio;
-  goal_checks: Array<{
+  goal_checks: {
     name: string;
     value: number;
     min?: number | null;
     max?: number | null;
     status: 'ok' | 'low' | 'high';
-  }>;
+  }[];
   warnings: string[];
   suggestions: string[];
   score: number;

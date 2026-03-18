@@ -28,8 +28,9 @@ export function BottomDock({
   onProfile,
 }: BottomDockProps) {
   const colorScheme = useColorScheme() ?? 'light';
+  const isDark = colorScheme === 'dark';
   const palette = usePalette();
-  const styles = useMemo(() => createStyles(palette), [palette]);
+  const styles = useMemo(() => createStyles(palette, isDark), [isDark, palette]);
 
   return (
     <View style={styles.dockWrap}>
@@ -104,7 +105,7 @@ export function BottomDock({
   );
 }
 
-function createStyles(colors: Palette) {
+function createStyles(colors: Palette, isDark: boolean) {
   return StyleSheet.create({
   dockWrap: {
     position: 'absolute',
@@ -120,9 +121,9 @@ function createStyles(colors: Palette) {
     borderRadius: 999,
     flexDirection: 'row',
     gap: 14,
-    backgroundColor: colors.white,
+    backgroundColor: isDark ? 'rgba(24, 22, 20, 0.9)' : colors.white,
     borderWidth: 1,
-    borderColor: colors.stone100,
+    borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : colors.stone100,
     overflow: 'hidden', 
     ...shadows.dock,
   },
@@ -135,20 +136,20 @@ function createStyles(colors: Palette) {
     gap: 4,
   },
   dockButtonHome: {
-    backgroundColor: colors.gold50,
+    backgroundColor: isDark ? 'rgba(255, 140, 66, 0.14)' : colors.gold50,
     ...shadows.glowGold,
   },
   dockButtonRecord: {
-    backgroundColor: colors.warm100,
+    backgroundColor: isDark ? 'rgba(76, 175, 80, 0.16)' : colors.warm100,
   },
   dockButtonRecommend: {
-    backgroundColor: colors.gold50,
+    backgroundColor: isDark ? 'rgba(255, 140, 66, 0.14)' : colors.gold50,
   },
   dockButtonTrend: {
-    backgroundColor: colors.rose100,
+    backgroundColor: isDark ? 'rgba(106, 142, 174, 0.18)' : colors.rose100,
   },
   dockButtonProfile: {
-    backgroundColor: colors.stone100,
+    backgroundColor: isDark ? colors.stone200 : colors.stone100,
     ...shadows.glowStone,
   },
   dockLabel: {

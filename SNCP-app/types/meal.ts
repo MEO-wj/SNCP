@@ -1,3 +1,5 @@
+import type { NutritionValues } from '@/types/nutrition';
+
 export type MealItem = {
   id?: number;
   meal_id?: number;
@@ -5,7 +7,7 @@ export type MealItem = {
   food_category?: string | null;
   weight_g?: number | null;
   source?: string | null;
-  nutrition?: Record<string, number>;
+  nutrition?: Partial<NutritionValues>;
 };
 
 export type Meal = {

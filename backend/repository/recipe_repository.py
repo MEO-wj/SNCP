@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from backend.db import db_session
+from psycopg.types.json import Jsonb
 
 
 class RecipeRepository:
@@ -43,9 +44,9 @@ class RecipeRepository:
                     payload.get("name"),
                     payload.get("cuisine"),
                     payload.get("tags") or [],
-                    payload.get("ingredients") or [],
-                    payload.get("steps") or [],
-                    payload.get("nutrition") or {},
+                    Jsonb(payload.get("ingredients") or []),
+                    Jsonb(payload.get("steps") or []),
+                    Jsonb(payload.get("nutrition") or {}),
                     payload.get("suitable_for") or [],
                 ),
             )
@@ -74,9 +75,9 @@ class RecipeRepository:
                     payload.get("name"),
                     payload.get("cuisine"),
                     payload.get("tags") or [],
-                    payload.get("ingredients") or [],
-                    payload.get("steps") or [],
-                    payload.get("nutrition") or {},
+                    Jsonb(payload.get("ingredients") or []),
+                    Jsonb(payload.get("steps") or []),
+                    Jsonb(payload.get("nutrition") or {}),
                     payload.get("suitable_for") or [],
                     recipe_id,
                 ),

@@ -6,15 +6,17 @@ import { useRouter } from 'expo-router';
 import { AmbientBackground } from '@/components/ambient-background';
 import { Palette } from '@/constants/palette';
 import { useAuthToken } from '@/hooks/use-auth-token';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePalette } from '@/hooks/use-palette';
 import { fetchGoals, updateGoals } from '@/services/profile';
 import type { NutritionGoals } from '@/types/profile';
 
 export default function GoalsDetailScreen() {
   const router = useRouter();
+  const isDark = useColorScheme() === 'dark';
   const token = useAuthToken();
   const palette = usePalette();
-  const styles = useMemo(() => createStyles(palette), [palette]);
+  const styles = useMemo(() => createStyles(palette, isDark), [isDark, palette]);
 
   const [goals, setGoals] = useState<NutritionGoals>({});
   const [saving, setSaving] = useState(false);
@@ -112,7 +114,7 @@ export default function GoalsDetailScreen() {
   );
 }
 
-function createStyles(palette: Palette) {
+function createStyles(palette: Palette, isDark: boolean) {
   return StyleSheet.create({
     safeArea: {
       flex: 1,
@@ -168,13 +170,13 @@ function createStyles(palette: Palette) {
       color: palette.stone400,
     },
     primaryButton: {
-      backgroundColor: palette.stone900,
+      backgroundColor: isDark ? palette.orange500 : palette.stone900,
       borderRadius: 18,
       paddingVertical: 14,
       alignItems: 'center',
     },
     primaryButtonText: {
-      color: palette.gold50,
+      color: isDark ? palette.surface : palette.gold50,
       fontSize: 16,
       fontWeight: '700',
     },
