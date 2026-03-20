@@ -59,7 +59,7 @@ export default function RootLayout() {
     let manifestObjectUrl: string | null = null;
 
     try {
-      const iconHref = Asset.fromModule(require('../assets/images/icon.png')).uri;
+      const iconHref = Asset.fromModule(require('../assets/images/icon-pot-hero.png')).uri;
       setLink('oareader-apple-touch-icon', 'apple-touch-icon', iconHref);
       setLink('oareader-icon', 'icon', iconHref);
 
