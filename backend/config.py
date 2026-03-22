@@ -16,6 +16,8 @@ class Config:
 
         # 默认值
         self.database_url: Optional[str] = None
+        self.db_init_max_attempts: int = 30
+        self.db_init_retry_delay_seconds: int = 2
         self.auth_access_token_ttl: timedelta = timedelta(days=7)
         self.auth_refresh_token_ttl: timedelta = timedelta(days=7)
         self.auth_jwt_secret: Optional[str] = None
@@ -68,6 +70,8 @@ class Config:
     def _override_with_environment(self) -> None:
         keys = [
             "DATABASE_URL",
+            "DB_INIT_MAX_ATTEMPTS",
+            "DB_INIT_RETRY_DELAY_SECONDS",
             "AUTH_ACCESS_TOKEN_TTL",
             "AUTH_REFRESH_TOKEN_TTL",
             "AUTH_JWT_SECRET",
@@ -97,6 +101,18 @@ class Config:
         value = raw_value.strip()
         if key == "DATABASE_URL":
             self.database_url = value or None
+        elif key == "DB_INIT_MAX_ATTEMPTS":
+            try:
+                attempts = int(value)
+                self.db_init_max_attempts = attempts if attempts > 0 else self.db_init_max_attempts
+            except ValueError:
+                pass
+        elif key == "DB_INIT_RETRY_DELAY_SECONDS":
+            try:
+                delay = int(value)
+                self.db_init_retry_delay_seconds = delay if delay >= 0 else self.db_init_retry_delay_seconds
+            except ValueError:
+                pass
         elif key == "AUTH_ACCESS_TOKEN_TTL":
             self.auth_access_token_ttl = self._parse_ttl(value, fallback=self.auth_access_token_ttl)
         elif key == "AUTH_REFRESH_TOKEN_TTL":

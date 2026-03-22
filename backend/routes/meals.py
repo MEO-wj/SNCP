@@ -1,8 +1,6 @@
-"""饮食记录接口。"""
-
 from __future__ import annotations
 
-from datetime import datetime, date
+from datetime import date, datetime
 
 from flask import Blueprint, jsonify, request
 
@@ -47,11 +45,16 @@ def create_meal():
     else:
         eaten_at = datetime.now()
 
+    client_request_id = data.get("client_request_id")
+    if client_request_id is not None and not isinstance(client_request_id, str):
+        return jsonify({"error": "client_request_id 必须为字符串"}), 400
+    client_request_id = (client_request_id or "").strip() or None
+
     items = data.get("items") or []
     if not isinstance(items, list):
         return jsonify({"error": "items 必须是数组"}), 400
 
-    normalized_items = []
+    normalized_items: list[dict[str, object]] = []
     for item in items:
         normalized_items.append(
             {
@@ -63,14 +66,15 @@ def create_meal():
             }
         )
 
-    meal_id = meal_repo.create_meal(
+    meal_id, created = meal_repo.create_meal(
         user_id=user_id,
         meal_type=meal_type,
         eaten_at=eaten_at,
+        client_request_id=client_request_id,
         note=data.get("note"),
         items=normalized_items,
     )
-    return jsonify({"meal_id": meal_id}), 201
+    return jsonify({"meal_id": meal_id, "created": created}), 201 if created else 200
 
 
 @bp.route("", methods=["GET"])
@@ -85,6 +89,19 @@ def list_meals():
     return jsonify({"date": day.isoformat(), "meals": meals}), 200
 
 
+@bp.route("/<int:meal_id>", methods=["DELETE"])
+@login_required
+def delete_meal(meal_id: int):
+    user_id = get_request_user_id(request)
+    if not user_id:
+        return jsonify({"error": "用户信息缺失"}), 400
+
+    deleted = meal_repo.delete_meal(user_id, meal_id)
+    if not deleted:
+        return jsonify({"error": "餐次不存在"}), 404
+    return ("", 204)
+
+
 @bp.route("/range", methods=["GET"])
 @login_required
 def list_meals_range():
@@ -96,6 +113,6 @@ def list_meals_range():
     end = _parse_date(request.args.get("end"))
     if not start or not end:
         return jsonify({"error": "start/end 参数必填，格式为 YYYY-MM-DD"}), 400
+
     meals = meal_repo.list_meals_by_range(user_id, start, end)
     return jsonify({"start": start.isoformat(), "end": end.isoformat(), "meals": meals}), 200
-

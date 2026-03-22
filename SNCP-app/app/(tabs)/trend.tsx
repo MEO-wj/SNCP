@@ -28,7 +28,7 @@ export default function TrendScreen() {
       return;
     }
     fetchNutritionTrend(token, 30)
-      .then((res) => setTrend(res.trend || []))
+      .then((res) => setTrend((res.trend || []).slice().reverse()))
       .catch((error) => console.error('[Trend] failed', error));
   }, [token]);
 

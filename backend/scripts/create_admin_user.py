@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.config import Config
+from backend.db import init_db
 from backend.repository.user_repository import NotFoundError, UserRepository
 
 
@@ -53,6 +54,7 @@ def main() -> None:
     password = get_required_env("ADMIN_PASSWORD")
     display_name = os.getenv("ADMIN_DISPLAY_NAME", "").strip() or phone
 
+    init_db()
     repo = UserRepository()
     hashed = hash_password(password, cfg.auth_password_cost)
 

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   AppleLogo,
@@ -16,9 +16,10 @@ import {
   MoonStars,
   Sparkle,
   SunHorizon,
+  Trash,
   XCircle,
 } from 'phosphor-react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AmbientBackground } from '@/components/ambient-background';
 import { BottomDock } from '@/components/bottom-dock';
@@ -33,7 +34,7 @@ import { colors, Palette } from '@/constants/palette';
 import { useAuthToken } from '@/hooks/use-auth-token';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePalette } from '@/hooks/use-palette';
-import { createMeal, fetchMealsByDate } from '@/services/meals';
+import { createMeal, deleteMeal, fetchMealsByDate } from '@/services/meals';
 import type { Meal, MealItem } from '@/types/meal';
 import type { NutritionValues } from '@/types/nutrition';
 import { formatTimeLabel } from '@/utils/date';
@@ -114,6 +115,10 @@ function getMealOption(value: string) {
   return MEAL_OPTIONS.find((item) => item.value === value) ?? MEAL_OPTIONS[0];
 }
 
+function createClientRequestId() {
+  return `meal-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function renderFoodIcon(icon: FoodIconKey, color: string, size = 18) {
   switch (icon) {
     case 'fish':
@@ -191,6 +196,7 @@ export default function RecordScreen() {
   const [selectedFoodId, setSelectedFoodId] = useState<string>(FOOD_CATALOG[0]?.id ?? '');
   const [selectedWeight, setSelectedWeight] = useState<number>(100);
   const [items, setItems] = useState<MealItem[]>([]);
+  const [draftRequestId, setDraftRequestId] = useState(() => createClientRequestId());
   const [saving, setSaving] = useState(false);
   const [errorText, setErrorText] = useState('');
 
@@ -218,19 +224,24 @@ export default function RecordScreen() {
 
   const loadMeals = useCallback(async () => {
     if (!token) {
-      return;
+      return [] as Meal[];
     }
     try {
       const res = await fetchMealsByDate(todayKey, token);
-      setMeals(res.meals || []);
+      const nextMeals = res.meals || [];
+      setMeals(nextMeals);
+      return nextMeals;
     } catch (error) {
       console.error('[Meals] load failed', error);
+      return [] as Meal[];
     }
   }, [todayKey, token]);
 
-  useEffect(() => {
-    void loadMeals();
-  }, [loadMeals]);
+  useFocusEffect(
+    useCallback(() => {
+      void loadMeals();
+    }, [loadMeals]),
+  );
 
   const selectedPortionNutrition = useMemo<NutritionValues>(() => {
     if (!selectedFood) {
@@ -246,11 +257,17 @@ export default function RecordScreen() {
     [draftTotals, todayTotals],
   );
 
+  const resetDraft = useCallback(() => {
+    setItems([]);
+    setDraftRequestId(createClientRequestId());
+  }, []);
+
   const handleAddItem = () => {
-    if (!selectedFood) {
+    if (!selectedFood || saving) {
       return;
     }
     setErrorText('');
+    setDraftRequestId(createClientRequestId());
     setItems((prev) => [
       ...prev,
       {
@@ -264,6 +281,10 @@ export default function RecordScreen() {
   };
 
   const handleRemoveDraftItem = (index: number) => {
+    if (saving) {
+      return;
+    }
+    setDraftRequestId(createClientRequestId());
     setItems((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
   };
 
@@ -278,19 +299,55 @@ export default function RecordScreen() {
         {
           meal_type: mealType,
           eaten_at: new Date().toISOString(),
+          client_request_id: draftRequestId,
           items,
         },
         token,
       );
-      setItems([]);
+      resetDraft();
       await loadMeals();
     } catch (error) {
       console.error('[Meals] create failed', error);
+      const latestMeals = await loadMeals();
+      const saved = latestMeals.some((meal) => meal.client_request_id === draftRequestId);
+      if (saved) {
+        resetDraft();
+        setErrorText('');
+        return;
+      }
       setErrorText(error instanceof Error ? error.message : '保存餐次失败，请稍后重试');
     } finally {
       setSaving(false);
     }
   };
+
+  const handleDeleteMeal = useCallback(
+    (meal: Meal) => {
+      if (!token || saving) {
+        return;
+      }
+      Alert.alert('删除餐次', '删除后无法恢复，确定删除这条餐次记录吗？', [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '删除',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              try {
+                setErrorText('');
+                await deleteMeal(meal.id, token);
+                await loadMeals();
+              } catch (error) {
+                console.error('[Meals] delete failed', error);
+                setErrorText(error instanceof Error ? error.message : '删除餐次失败，请稍后重试');
+              }
+            })();
+          },
+        },
+      ]);
+    },
+    [loadMeals, saving, token],
+  );
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -347,7 +404,13 @@ export default function RecordScreen() {
                       backgroundColor: isDark ? option.surfaceTintDark : option.surfaceTintLight,
                     },
                   ]}
-                  onPress={() => setMealType(option.value)}
+	                  onPress={() => {
+	                    if (saving) {
+	                      return;
+	                    }
+	                    setMealType(option.value);
+	                    setDraftRequestId(createClientRequestId());
+	                  }}
                 >
                   <View style={[styles.mealTypeIconWrap, active && { backgroundColor: option.tint }]}>
                     <Icon size={18} color={active ? (isDark ? palette.surface : palette.white) : option.tint} weight="fill" />
@@ -537,9 +600,19 @@ export default function RecordScreen() {
                           <Text style={styles.mealCardTime}>{formatTimeLabel(meal.eaten_at)}</Text>
                         </View>
                       </View>
-                      <View style={styles.mealCardCalories}>
-                        <Fire size={14} color={palette.orange500} weight="fill" />
-                        <Text style={styles.mealCardCaloriesText}>{Math.round(totals.calories)} kcal</Text>
+                      <View style={styles.mealCardActions}>
+                        <View style={styles.mealCardCalories}>
+                          <Fire size={14} color={palette.orange500} weight="fill" />
+                          <Text style={styles.mealCardCaloriesText}>{Math.round(totals.calories)} kcal</Text>
+                        </View>
+                        <Pressable
+                          style={styles.mealCardDeleteButton}
+                          onPress={() => handleDeleteMeal(meal)}
+                          disabled={saving}
+                        >
+                          <Trash size={14} color={palette.imperial500} weight="bold" />
+                          <Text style={styles.mealCardDeleteText}>删除</Text>
+                        </Pressable>
                       </View>
                     </View>
 
@@ -1105,6 +1178,24 @@ function createStyles(palette: Palette, isDark: boolean) {
       fontSize: 12,
       fontWeight: '700',
       color: palette.orange500,
+    },
+    mealCardActions: {
+      alignItems: 'flex-end',
+      gap: 8,
+    },
+    mealCardDeleteButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
+      backgroundColor: isDark ? 'rgba(255, 99, 132, 0.12)' : palette.rose100,
+    },
+    mealCardDeleteText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.imperial500,
     },
     mealCardMacros: {
       flexDirection: 'row',

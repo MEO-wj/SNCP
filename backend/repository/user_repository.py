@@ -12,45 +12,6 @@ class NotFoundError(Exception):
 
 
 class UserRepository:
-    def __init__(self) -> None:
-        self._ensure_tables()
-
-    def _ensure_tables(self) -> None:
-        with db_session() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS users (
-                        id UUID PRIMARY KEY,
-                        phone TEXT NOT NULL UNIQUE,
-                        display_name TEXT NOT NULL,
-                        password_hash TEXT NOT NULL,
-                        password_algo TEXT NOT NULL,
-                        password_cost INT NOT NULL,
-                        roles TEXT[] NOT NULL DEFAULT '{}',
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                        last_login_at TIMESTAMPTZ
-                    );
-                    """
-                )
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS sessions (
-                        id UUID PRIMARY KEY,
-                        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                        refresh_token_sha TEXT NOT NULL UNIQUE,
-                        expires_at TIMESTAMPTZ NOT NULL,
-                        user_agent TEXT,
-                        ip TEXT,
-                        revoked_at TIMESTAMPTZ,
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-                    );
-                    """
-                )
-                cur.execute("CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions(user_id);")
-            conn.commit()
-
     def get_credential(self, phone: str) -> UserCredential:
         with db_session() as conn, conn.cursor() as cur:
             cur.execute(

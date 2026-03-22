@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Sparkle } from 'phosphor-react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AmbientBackground } from '@/components/ambient-background';
 import { BottomDock } from '@/components/bottom-dock';
@@ -23,7 +23,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(false);
   const currentDate = useMemo(() => formatDateLabel(), []);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!token) {
       return;
     }
@@ -36,11 +36,13 @@ export default function HomeScreen() {
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    void loadData();
   }, [token]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadData();
+    }, [loadData]),
+  );
 
   const calories = Math.round(data?.totals?.calories ?? 0);
   const mealCount = data?.meal_count ?? 0;

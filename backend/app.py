@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import sys
+import time
 from typing import Any
 
 from flask import Flask, jsonify, request
@@ -37,6 +38,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def _initialize_database() -> None:
+    last_error: Exception | None = None
+    for attempt in range(1, config.db_init_max_attempts + 1):
+        try:
+            init_db()
+            logger.info("database initialization completed")
+            return
+        except Exception as exc:
+            last_error = exc
+            if attempt >= config.db_init_max_attempts:
+                break
+            logger.warning(
+                "database initialization attempt %s/%s failed: %s; retrying in %ss",
+                attempt,
+                config.db_init_max_attempts,
+                exc,
+                config.db_init_retry_delay_seconds,
+            )
+            time.sleep(config.db_init_retry_delay_seconds)
+
+    raise RuntimeError("database initialization failed after retries") from last_error
+
 # 初始化Flask应用
 app = Flask(__name__)
 
@@ -51,11 +75,7 @@ app.config['JSON_AS_ASCII'] = False  # 支持中文
 CORS(app, origins=config.cors_allow_origins or ['*'])  # 允许所有来源，生产环境应限制具体域名
 
 # 初始化数据库结构与索引（幂等）
-try:
-    init_db()
-    logger.info("数据库初始化/迁移完成")
-except Exception as e:
-    logger.error(f"数据库初始化/迁移失败: {e}")
+_initialize_database()
 
 # 初始化Redis连接
 # 用于缓存API响应，提升性能并减少数据库压力

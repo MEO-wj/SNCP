@@ -13,9 +13,11 @@ export async function fetchMealsByDate(date: string, token: string) {
   } catch {
     throw new Error('无法连接后端服务，请检查服务器网络');
   }
+
   if (!resp.ok) {
     throw new Error('获取饮食记录失败');
   }
+
   return (await resp.json()) as { date: string; meals: Meal[] };
 }
 
@@ -33,16 +35,44 @@ export async function createMeal(payload: Record<string, unknown>, token: string
   } catch {
     throw new Error('无法连接后端服务，请检查服务器网络');
   }
+
   if (resp.status === 405 || resp.status === 404) {
-    throw new Error('服务器当前未部署餐次保存接口');
+    throw new Error('服务端当前未部署餐次保存接口');
   }
+
   if (resp.status >= 500) {
     const error = await resp.json().catch(() => ({}));
-    throw new Error(error.error || '服务器保存餐次失败，请检查后端日志');
+    throw new Error(error.error || '服务端保存餐次失败，请检查后端日志');
   }
+
   if (!resp.ok) {
     const error = await resp.json().catch(() => ({}));
     throw new Error(error.error || '创建失败');
   }
-  return (await resp.json()) as { meal_id: number };
+
+  return (await resp.json()) as { meal_id: number; created: boolean };
+}
+
+export async function deleteMeal(mealId: number, token: string) {
+  let resp: Response;
+  try {
+    resp = await fetch(`${getApiBaseUrl()}/meals/${mealId}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        ...buildAuthHeaders(token),
+      },
+    });
+  } catch {
+    throw new Error('无法连接后端服务，请检查服务器网络');
+  }
+
+  if (resp.status === 404) {
+    throw new Error('餐次不存在或已被删除');
+  }
+
+  if (!resp.ok) {
+    const error = await resp.json().catch(() => ({}));
+    throw new Error(error.error || '删除失败');
+  }
 }

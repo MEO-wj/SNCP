@@ -14,6 +14,7 @@ export type Meal = {
   id: number;
   meal_type: string;
   eaten_at: string;
+  client_request_id?: string | null;
   note?: string | null;
   items: MealItem[];
 };

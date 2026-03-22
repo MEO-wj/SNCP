@@ -91,11 +91,14 @@ def init_db() -> None:
             user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             meal_type TEXT NOT NULL,
             eaten_at TIMESTAMPTZ NOT NULL,
+            client_request_id TEXT,
             note TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
         """,
         "CREATE INDEX IF NOT EXISTS meals_user_time_idx ON meals(user_id, eaten_at DESC);",
+        "ALTER TABLE meals ADD COLUMN IF NOT EXISTS client_request_id TEXT;",
+        "CREATE UNIQUE INDEX IF NOT EXISTS meals_user_client_request_idx ON meals(user_id, client_request_id);",
         """
         CREATE TABLE IF NOT EXISTS meal_items (
             id BIGSERIAL PRIMARY KEY,
