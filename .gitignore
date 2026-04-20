@@ -76,3 +76,4 @@ expo-env.d.ts
 # local architecture artifacts
 docs/technical_architecture.md
 docs/generated/
+docs/food/

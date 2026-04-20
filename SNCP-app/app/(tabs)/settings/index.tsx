@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import { PencilSimpleLine, Phone } from 'phosphor-react-native';
 
 import { AmbientBackground } from '@/components/ambient-background';
@@ -139,20 +138,10 @@ export default function SettingsScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.pageTitle}>我的</Text>
         <View style={[styles.card, styles.accountCard]}>
-          <View style={[styles.cardOrb, styles.accountOrb]} />
-          <View pointerEvents="none" style={styles.accountOrbSecondary} />
-          <LinearGradient
-            colors={[palette.gold50, palette.warm100]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.accountHero}
-          >
-            <View pointerEvents="none" style={styles.accountWave} />
+          <View style={styles.accountHero}>
             <View style={styles.accountHeroMain}>
-              <View style={styles.accountAvatarOuter}>
-                <View style={styles.accountAvatarInner}>
-                  <Text style={styles.accountAvatarText}>{avatarText}</Text>
-                </View>
+              <View style={styles.accountAvatar}>
+                <Text style={styles.accountAvatarText}>{avatarText}</Text>
               </View>
               <View style={styles.accountHeroTextGroup}>
                 <Text style={styles.accountHeroTitle} numberOfLines={1}>
@@ -173,7 +162,7 @@ export default function SettingsScreen() {
             >
               <PencilSimpleLine size={16} color={palette.stone800} weight="bold" />
             </Pressable>
-          </LinearGradient>
+          </View>
           <View style={styles.accountInfoGrid}>
             <View style={styles.accountInfoChip}>
               <View style={styles.accountInfoHead}>
@@ -200,7 +189,6 @@ export default function SettingsScreen() {
           style={[styles.entryCard, styles.healthEntryCard]}
           onPress={() => router.push('/settings/profile')}
         >
-          <View style={[styles.cardOrb, styles.healthOrb]} />
           <View style={styles.entryHead}>
             <View style={styles.entryTitleGroup}>
               <View style={[styles.entryPill, styles.healthPill]}>
@@ -220,7 +208,6 @@ export default function SettingsScreen() {
           style={[styles.entryCard, styles.goalsEntryCard]}
           onPress={() => router.push('/settings/goals')}
         >
-          <View style={[styles.cardOrb, styles.goalsOrb]} />
           <View style={styles.entryHead}>
             <View style={styles.entryTitleGroup}>
               <View style={[styles.entryPill, styles.goalsPill]}>
@@ -237,7 +224,6 @@ export default function SettingsScreen() {
         </Pressable>
 
         <View style={[styles.card, styles.themeCard]}>
-          <View style={[styles.cardOrb, styles.themeOrb]} />
           <Text style={styles.cardTitle}>日夜间模式</Text>
           <View style={styles.themeRow}>
             {themeOptions.map((option) => {
@@ -258,7 +244,6 @@ export default function SettingsScreen() {
         </View>
 
         <View style={[styles.card, styles.featureCard]}>
-          <View style={[styles.cardOrb, styles.featureOrb]} />
           <Text style={styles.cardTitle}>功能入口</Text>
           <Pressable style={styles.linkButton} onPress={() => router.push('/reminders')}>
             <Text style={styles.linkButtonText}>提醒设置</Text>
@@ -313,64 +298,29 @@ function createStyles(palette: Palette) {
       marginBottom: 4,
     },
     card: {
-      backgroundColor: palette.cardTint,
+      backgroundColor: palette.white,
       borderRadius: 20,
       padding: 16,
       borderWidth: 1,
-      borderColor: palette.stone200,
+      borderColor: palette.stone100,
       gap: 10,
       overflow: 'hidden',
       shadowColor: '#000',
       shadowOpacity: 0.05,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 5 },
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
     },
     accountCard: {
-      backgroundColor: palette.cardTint,
       gap: 12,
     },
     themeCard: {
-      backgroundColor: palette.surfaceWarm,
+      borderColor: palette.stone100,
     },
     featureCard: {
-      backgroundColor: palette.cardTint,
-    },
-    cardOrb: {
-      position: 'absolute',
-      width: 104,
-      height: 104,
-      borderRadius: 999,
-      top: -42,
-      right: -26,
-      opacity: 0.55,
-    },
-    accountOrb: {
-      backgroundColor: palette.gold200,
-    },
-    accountOrbSecondary: {
-      position: 'absolute',
-      width: 96,
-      height: 96,
-      borderRadius: 999,
-      left: -26,
-      bottom: -34,
-      backgroundColor: palette.warm100,
-      opacity: 0.5,
-    },
-    healthOrb: {
-      backgroundColor: palette.warm100,
-    },
-    goalsOrb: {
-      backgroundColor: palette.gold100,
-    },
-    themeOrb: {
-      backgroundColor: palette.rose100,
-    },
-    featureOrb: {
-      backgroundColor: palette.warm100,
+      borderColor: palette.stone100,
     },
     cardTitle: {
-      fontSize: 16,
+      fontSize: 18,
       fontWeight: '700',
       color: palette.stone800,
     },
@@ -378,10 +328,8 @@ function createStyles(palette: Palette) {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      borderRadius: 16,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
-      overflow: 'hidden',
+      paddingHorizontal: 2,
+      paddingVertical: 4,
     },
     accountHeroMain: {
       flexDirection: 'row',
@@ -395,11 +343,11 @@ function createStyles(palette: Palette) {
       borderRadius: 19,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: palette.surface,
+      backgroundColor: palette.white,
       borderWidth: 1,
-      borderColor: palette.stone300,
+      borderColor: palette.stone200,
       shadowColor: '#000',
-      shadowOpacity: 0.14,
+      shadowOpacity: 0.06,
       shadowRadius: 4,
       shadowOffset: { width: 0, height: 2 },
       alignSelf: 'center',
@@ -408,40 +356,16 @@ function createStyles(palette: Palette) {
       opacity: 0.82,
       transform: [{ scale: 0.97 }],
     },
-    accountWave: {
-      position: 'absolute',
-      width: 120,
-      height: 120,
+    accountAvatar: {
+      width: 64,
+      height: 64,
       borderRadius: 999,
-      right: -24,
-      top: -36,
-      backgroundColor: palette.gold100,
-      opacity: 0.7,
-    },
-    accountAvatarOuter: {
-      width: 52,
-      height: 52,
-      borderRadius: 999,
-      backgroundColor: palette.white,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: palette.stone200,
-      shadowColor: '#000',
-      shadowOpacity: 0.08,
-      shadowRadius: 6,
-      shadowOffset: { width: 0, height: 2 },
-    },
-    accountAvatarInner: {
-      width: 40,
-      height: 40,
-      borderRadius: 999,
-      backgroundColor: palette.gold100,
+      backgroundColor: palette.surfaceWarm,
       alignItems: 'center',
       justifyContent: 'center',
     },
     accountAvatarText: {
-      fontSize: 18,
+      fontSize: 24,
       fontWeight: '800',
       color: palette.stone800,
     },
@@ -468,7 +392,7 @@ function createStyles(palette: Palette) {
     accountInfoChip: {
       flex: 1,
       gap: 6,
-      backgroundColor: palette.surfaceWarm,
+      backgroundColor: palette.white,
       borderRadius: 14,
       paddingHorizontal: 12,
       paddingVertical: 10,
@@ -528,19 +452,19 @@ function createStyles(palette: Palette) {
       borderRadius: 20,
       padding: 16,
       borderWidth: 1,
-      borderColor: palette.stone200,
+      borderColor: palette.stone100,
       gap: 8,
       overflow: 'hidden',
       shadowColor: '#000',
-      shadowOpacity: 0.04,
+      shadowOpacity: 0.05,
       shadowRadius: 8,
       shadowOffset: { width: 0, height: 4 },
     },
     healthEntryCard: {
-      backgroundColor: palette.cardTint,
+      borderColor: palette.stone100,
     },
     goalsEntryCard: {
-      backgroundColor: palette.surfaceWarm,
+      borderColor: palette.stone100,
     },
     entryHead: {
       flexDirection: 'row',
@@ -591,7 +515,7 @@ function createStyles(palette: Palette) {
       borderRadius: 999,
       borderWidth: 1,
       borderColor: palette.stone100,
-      backgroundColor: palette.surfaceWarm,
+      backgroundColor: palette.stone100,
     },
     themeButton: {
       flex: 1,
@@ -612,7 +536,7 @@ function createStyles(palette: Palette) {
       color: palette.white,
     },
     linkButton: {
-      backgroundColor: palette.surfaceWarm,
+      backgroundColor: palette.white,
       borderRadius: 14,
       paddingVertical: 12,
       paddingHorizontal: 14,

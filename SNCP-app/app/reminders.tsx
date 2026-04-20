@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -21,7 +21,7 @@ export default function RemindersScreen() {
   const [time, setTime] = useState('08:00');
   const [note, setNote] = useState('');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!token) {
       return;
     }
@@ -31,11 +31,11 @@ export default function RemindersScreen() {
     } catch (error) {
       console.error('[Reminders] failed', error);
     }
-  };
+  }, [token]);
 
   useEffect(() => {
     void load();
-  }, [token]);
+  }, [load]);
 
   const handleAdd = async () => {
     if (!token) {

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -27,7 +27,7 @@ export default function HealthRulesScreen() {
   const [foods, setFoods] = useState('');
   const [tips, setTips] = useState('');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!token) {
       return;
     }
@@ -38,11 +38,11 @@ export default function HealthRulesScreen() {
       const data = await resp.json();
       setRules(data.rules || []);
     }
-  };
+  }, [token]);
 
   useEffect(() => {
     void load();
-  }, [token]);
+  }, [load]);
 
   const handleSave = async () => {
     if (!token) {

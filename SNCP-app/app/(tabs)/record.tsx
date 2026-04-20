@@ -1,10 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   AppleLogo,
+  CaretLeft,
   CaretRight,
   Clock,
+  ClockCounterClockwise,
   Coffee,
   Cookie,
   Drop,
@@ -20,6 +22,7 @@ import {
   XCircle,
 } from 'phosphor-react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
+import Animated, { FadeInLeft, FadeInRight, FadeOutLeft, FadeOutRight, LinearTransition } from 'react-native-reanimated';
 
 import { AmbientBackground } from '@/components/ambient-background';
 import { BottomDock } from '@/components/bottom-dock';
@@ -28,6 +31,7 @@ import {
   FOOD_CATEGORIES,
   FOOD_WEIGHT_OPTIONS,
   type FoodCategory,
+  type FoodCatalogItem,
   type FoodIconKey,
 } from '@/constants/food-catalog';
 import { colors, Palette } from '@/constants/palette';
@@ -97,6 +101,14 @@ const MEAL_OPTIONS: MealOption[] = [
     surfaceTintDark: 'rgba(76, 175, 80, 0.12)',
   },
 ];
+
+const DEFAULT_VISIBLE_CATEGORIES = 4;
+const DEFAULT_VISIBLE_FOODS = 4;
+
+type WizardStep = 'meal' | 'category' | 'food' | 'weight' | 'review' | 'draft';
+type DraftAccessMode = 'after-add' | 'browse' | null;
+
+const WIZARD_STEP_ORDER: WizardStep[] = ['meal', 'category', 'food', 'weight', 'review'];
 
 const FOOD_CATEGORY_LABELS: Record<FoodCategory, string> = FOOD_CATEGORIES.reduce(
   (acc, item) => ({ ...acc, [item.value]: item.label }),
@@ -189,16 +201,27 @@ export default function RecordScreen() {
   const token = useAuthToken();
   const palette = usePalette();
   const styles = useMemo(() => createStyles(palette, isDark), [isDark, palette]);
+  const scrollViewRef = useRef<ScrollView | null>(null);
+  const wizardCardOffsetRef = useRef(0);
 
   const [meals, setMeals] = useState<Meal[]>([]);
+  const [wizardStep, setWizardStep] = useState<WizardStep>('meal');
+  const [wizardHistory, setWizardHistory] = useState<WizardStep[]>([]);
+  const [wizardDirection, setWizardDirection] = useState<'forward' | 'back'>('forward');
+  const [draftAccessMode, setDraftAccessMode] = useState<DraftAccessMode>(null);
   const [mealType, setMealType] = useState('breakfast');
   const [selectedCategory, setSelectedCategory] = useState<FoodCategory>('staple');
-  const [selectedFoodId, setSelectedFoodId] = useState<string>(FOOD_CATALOG[0]?.id ?? '');
+  const [selectedFoodId, setSelectedFoodId] = useState<string>('');
   const [selectedWeight, setSelectedWeight] = useState<number>(100);
   const [items, setItems] = useState<MealItem[]>([]);
   const [draftRequestId, setDraftRequestId] = useState(() => createClientRequestId());
   const [saving, setSaving] = useState(false);
   const [errorText, setErrorText] = useState('');
+  const [showAllCategories, setShowAllCategories] = useState(false);
+  const [showAllFoods, setShowAllFoods] = useState(false);
+  const [mealPendingDelete, setMealPendingDelete] = useState<Meal | null>(null);
+  const [deleteErrorText, setDeleteErrorText] = useState('');
+  const [deletingMealId, setDeletingMealId] = useState<number | null>(null);
 
   const todayKey = useMemo(() => getTodayKey(), []);
 
@@ -206,33 +229,47 @@ export default function RecordScreen() {
     () => FOOD_CATALOG.filter((item) => item.category === selectedCategory),
     [selectedCategory],
   );
+  const displayedCategories = useMemo(
+    () => (showAllCategories ? FOOD_CATEGORIES : FOOD_CATEGORIES.slice(0, DEFAULT_VISIBLE_CATEGORIES)),
+    [showAllCategories],
+  );
+  const hiddenCategoryCount = FOOD_CATEGORIES.length - displayedCategories.length;
+  const displayedFoods = useMemo(
+    () => (showAllFoods ? visibleFoods : visibleFoods.slice(0, DEFAULT_VISIBLE_FOODS)),
+    [showAllFoods, visibleFoods],
+  );
+  const hiddenFoodCount = visibleFoods.length - displayedFoods.length;
 
   useEffect(() => {
     if (visibleFoods.length === 0) {
       setSelectedFoodId('');
       return;
     }
-    if (!visibleFoods.some((item) => item.id === selectedFoodId)) {
-      setSelectedFoodId(visibleFoods[0].id);
+    if (selectedFoodId && !visibleFoods.some((item) => item.id === selectedFoodId)) {
+      setSelectedFoodId('');
     }
   }, [selectedFoodId, visibleFoods]);
 
   const selectedFood = useMemo(
-    () => visibleFoods.find((item) => item.id === selectedFoodId) ?? visibleFoods[0] ?? null,
+    () => visibleFoods.find((item) => item.id === selectedFoodId) ?? null,
     [selectedFoodId, visibleFoods],
   );
 
   const loadMeals = useCallback(async () => {
     if (!token) {
+      setMeals([]);
+      setErrorText('登录状态失效，请重新登录后再同步餐次。');
       return [] as Meal[];
     }
     try {
       const res = await fetchMealsByDate(todayKey, token);
       const nextMeals = res.meals || [];
       setMeals(nextMeals);
+      setErrorText('');
       return nextMeals;
     } catch (error) {
       console.error('[Meals] load failed', error);
+      setErrorText(error instanceof Error ? error.message : '获取餐次失败，请检查后端服务。');
       return [] as Meal[];
     }
   }, [todayKey, token]);
@@ -256,14 +293,126 @@ export default function RecordScreen() {
     () => sumNutritionValues(todayTotals, draftTotals),
     [draftTotals, todayTotals],
   );
+  const currentMealOption = useMemo(() => getMealOption(mealType), [mealType]);
+  const selectedCategoryOption = useMemo(
+    () => FOOD_CATEGORIES.find((item) => item.value === selectedCategory) ?? FOOD_CATEGORIES[0],
+    [selectedCategory],
+  );
+  const wizardProgressIndex = useMemo(() => {
+    const index = WIZARD_STEP_ORDER.indexOf(wizardStep);
+    return index >= 0 ? index + 1 : WIZARD_STEP_ORDER.length;
+  }, [wizardStep]);
+  const wizardMeta = useMemo(() => {
+    switch (wizardStep) {
+      case 'meal':
+        return { eyebrow: `步骤 1/${WIZARD_STEP_ORDER.length}`, title: '先选餐次', subtitle: '这一餐属于早餐、午餐、晚餐还是加餐？' };
+      case 'category':
+        return { eyebrow: `步骤 2/${WIZARD_STEP_ORDER.length}`, title: '再选食物分类', subtitle: '分类单独成页，避免一屏同时塞太多内容。' };
+      case 'food':
+        return { eyebrow: `步骤 3/${WIZARD_STEP_ORDER.length}`, title: '挑一个食物', subtitle: '默认先给常用项，需要时再展开更多。' };
+      case 'weight':
+        return { eyebrow: `步骤 4/${WIZARD_STEP_ORDER.length}`, title: '确认重量', subtitle: '这一页只处理克重，减少误触。' };
+      case 'review':
+        return { eyebrow: `步骤 5/${WIZARD_STEP_ORDER.length}`, title: '加入本餐', subtitle: '最后确认一次，再把这项食物加入当前餐次。' };
+      case 'draft':
+      default:
+        return { eyebrow: '本餐草稿', title: '查看待保存内容', subtitle: '这里汇总已经加入的食物，可以继续添加，也可以直接保存。' };
+    }
+  }, [wizardStep]);
+  const wizardContextPills = useMemo(() => {
+    const pills: string[] = [];
+    if (wizardStep !== 'meal') {
+      pills.push(currentMealOption.label);
+    }
+    if (['food', 'weight', 'review'].includes(wizardStep)) {
+      pills.push(selectedCategoryOption.label);
+    }
+    if (selectedFood && ['weight', 'review'].includes(wizardStep)) {
+      pills.push(selectedFood.name);
+    }
+    if (wizardStep === 'review') {
+      pills.push(`${selectedWeight}g`);
+    }
+    if (wizardStep === 'draft' && items.length > 0) {
+      pills.push(`${items.length} 项食物`);
+    }
+    return pills;
+  }, [currentMealOption.label, items.length, selectedCategoryOption.label, selectedFood, selectedWeight, wizardStep]);
+  const wizardStageMinHeight = useMemo(() => {
+    switch (wizardStep) {
+      case 'meal':
+        return 228;
+      case 'category':
+        return 220;
+      case 'food':
+        return 320;
+      case 'weight':
+        return 248;
+      case 'review':
+        return 236;
+      case 'draft':
+      default:
+        return 0;
+    }
+  }, [wizardStep]);
+  const canGoBack = wizardHistory.length > 0 && !(wizardStep === 'draft' && draftAccessMode === 'after-add');
+  const wizardEntering = wizardDirection === 'forward' ? FadeInRight.duration(220) : FadeInLeft.duration(220);
+  const wizardExiting = wizardDirection === 'forward' ? FadeOutLeft.duration(180) : FadeOutRight.duration(180);
+  const pendingDeleteOption = useMemo(
+    () => (mealPendingDelete ? getMealOption(mealPendingDelete.meal_type) : null),
+    [mealPendingDelete],
+  );
+  const pendingDeleteTotals = useMemo(
+    () => (mealPendingDelete ? sumMealItemsNutrition(mealPendingDelete.items || []) : EMPTY_NUTRITION),
+    [mealPendingDelete],
+  );
+  const PendingDeleteIcon = pendingDeleteOption?.icon;
 
   const resetDraft = useCallback(() => {
     setItems([]);
     setDraftRequestId(createClientRequestId());
   }, []);
 
-  const handleAddItem = () => {
-    if (!selectedFood || saving) {
+  const scrollToWizardCard = useCallback(() => {
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const y = Math.max(0, wizardCardOffsetRef.current - 20);
+        scrollViewRef.current?.scrollTo({ y, animated: true });
+      }, 80);
+    });
+  }, []);
+
+  const navigateWizard = useCallback(
+    (nextStep: WizardStep, options?: { resetHistory?: boolean; draftMode?: DraftAccessMode; keepDirection?: boolean }) => {
+      setWizardDirection(options?.keepDirection ? wizardDirection : 'forward');
+      setDraftAccessMode(options?.draftMode ?? null);
+      setWizardHistory((prev) => (options?.resetHistory ? [] : [...prev, wizardStep]));
+      setWizardStep(nextStep);
+      scrollToWizardCard();
+    },
+    [scrollToWizardCard, wizardDirection, wizardStep],
+  );
+
+  const handleWizardBack = useCallback(() => {
+    if (!canGoBack) {
+      return;
+    }
+    const nextHistory = [...wizardHistory];
+    const previousStep = nextHistory.pop();
+    if (!previousStep) {
+      return;
+    }
+    setWizardDirection('back');
+    setWizardHistory(nextHistory);
+    setWizardStep(previousStep);
+    if (wizardStep === 'draft') {
+      setDraftAccessMode(null);
+    }
+    scrollToWizardCard();
+  }, [canGoBack, scrollToWizardCard, wizardHistory, wizardStep]);
+
+  const addDraftItem = useCallback((food: FoodCatalogItem, weight: number) => {
+    if (saving) {
       return;
     }
     setErrorText('');
@@ -271,14 +420,105 @@ export default function RecordScreen() {
     setItems((prev) => [
       ...prev,
       {
-        food_name: selectedFood.name,
-        food_category: FOOD_CATEGORY_LABELS[selectedFood.category],
-        weight_g: selectedWeight,
+        food_name: food.name,
+        food_category: FOOD_CATEGORY_LABELS[food.category],
+        weight_g: weight,
         source: 'catalog',
-        nutrition: selectedFood.nutritionPer100g,
+        nutrition: food.nutritionPer100g,
       },
     ]);
-  };
+  }, [saving]);
+
+  const handleMealTypeSelect = useCallback(
+    (value: string) => {
+      if (saving) {
+        return;
+      }
+      setMealType(value);
+      setDraftRequestId(createClientRequestId());
+      navigateWizard('category');
+    },
+    [navigateWizard, saving],
+  );
+
+  const handleCategorySelect = useCallback(
+    (value: FoodCategory) => {
+      if (saving) {
+        return;
+      }
+      if (value === selectedCategory) {
+        navigateWizard('food');
+        return;
+      }
+      setSelectedCategory(value);
+      setSelectedFoodId('');
+      setShowAllFoods(false);
+      navigateWizard('food');
+    },
+    [navigateWizard, saving, selectedCategory],
+  );
+
+  const handleFoodSelect = useCallback(
+    (foodId: string) => {
+      if (saving) {
+        return;
+      }
+      setSelectedFoodId(foodId);
+      navigateWizard('weight');
+    },
+    [navigateWizard, saving],
+  );
+
+  const handleWeightSelect = useCallback(
+    (weight: number) => {
+      if (saving) {
+        return;
+      }
+      setSelectedWeight(weight);
+      if (!selectedFood) {
+        navigateWizard('food');
+        return;
+      }
+      navigateWizard('review');
+    },
+    [navigateWizard, saving, selectedFood],
+  );
+
+  const handleShowMoreCategories = useCallback(() => {
+    setShowAllCategories(true);
+  }, []);
+
+  const handleShowMoreFoods = useCallback(() => {
+    setShowAllFoods(true);
+  }, []);
+
+  const handleOpenDraft = useCallback(() => {
+    if (items.length === 0 || wizardStep === 'draft') {
+      return;
+    }
+    navigateWizard('draft', { draftMode: 'browse' });
+  }, [items.length, navigateWizard, wizardStep]);
+
+  const handleAddCurrentSelection = useCallback(() => {
+    if (!selectedFood || saving) {
+      return;
+    }
+    addDraftItem(selectedFood, selectedWeight);
+    setSelectedFoodId('');
+    setDraftAccessMode('after-add');
+    setWizardDirection('forward');
+    setWizardHistory([]);
+    setWizardStep('draft');
+    scrollToWizardCard();
+  }, [addDraftItem, saving, scrollToWizardCard, selectedFood, selectedWeight]);
+
+  const handleContinueAdding = useCallback(() => {
+    setDraftAccessMode(null);
+    setWizardDirection('forward');
+    setWizardHistory(['meal']);
+    setWizardStep('category');
+    scrollToWizardCard();
+  }, [scrollToWizardCard]);
 
   const handleRemoveDraftItem = (index: number) => {
     if (saving) {
@@ -289,7 +529,11 @@ export default function RecordScreen() {
   };
 
   const handleSubmit = async () => {
-    if (!token || items.length === 0 || saving) {
+    if (!token) {
+      setErrorText('当前未登录，无法保存餐次。');
+      return;
+    }
+    if (items.length === 0 || saving) {
       return;
     }
     setSaving(true);
@@ -305,6 +549,12 @@ export default function RecordScreen() {
         token,
       );
       resetDraft();
+      setSelectedFoodId('');
+      setSelectedWeight(100);
+      setDraftAccessMode(null);
+      setWizardDirection('forward');
+      setWizardHistory([]);
+      setWizardStep('meal');
       await loadMeals();
     } catch (error) {
       console.error('[Meals] create failed', error);
@@ -312,6 +562,12 @@ export default function RecordScreen() {
       const saved = latestMeals.some((meal) => meal.client_request_id === draftRequestId);
       if (saved) {
         resetDraft();
+        setSelectedFoodId('');
+        setSelectedWeight(100);
+        setDraftAccessMode(null);
+        setWizardDirection('forward');
+        setWizardHistory([]);
+        setWizardStep('meal');
         setErrorText('');
         return;
       }
@@ -321,38 +577,47 @@ export default function RecordScreen() {
     }
   };
 
+  const closeDeleteModal = useCallback(() => {
+    if (deletingMealId !== null) {
+      return;
+    }
+    setMealPendingDelete(null);
+    setDeleteErrorText('');
+  }, [deletingMealId]);
+
   const handleDeleteMeal = useCallback(
     (meal: Meal) => {
-      if (!token || saving) {
+      if (!token || saving || deletingMealId !== null) {
         return;
       }
-      Alert.alert('删除餐次', '删除后无法恢复，确定删除这条餐次记录吗？', [
-        { text: '取消', style: 'cancel' },
-        {
-          text: '删除',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              try {
-                setErrorText('');
-                await deleteMeal(meal.id, token);
-                await loadMeals();
-              } catch (error) {
-                console.error('[Meals] delete failed', error);
-                setErrorText(error instanceof Error ? error.message : '删除餐次失败，请稍后重试');
-              }
-            })();
-          },
-        },
-      ]);
+      setDeleteErrorText('');
+      setMealPendingDelete(meal);
     },
-    [loadMeals, saving, token],
+    [deletingMealId, saving, token],
   );
+
+  const confirmDeleteMeal = useCallback(async () => {
+    if (!token || !mealPendingDelete || deletingMealId !== null) {
+      return;
+    }
+    setDeleteErrorText('');
+    setDeletingMealId(mealPendingDelete.id);
+    try {
+      await deleteMeal(mealPendingDelete.id, token);
+      setMealPendingDelete(null);
+      await loadMeals();
+    } catch (error) {
+      console.error('[Meals] delete failed', error);
+      setDeleteErrorText(error instanceof Error ? error.message : '删除餐次失败，请稍后重试');
+    } finally {
+      setDeletingMealId(null);
+    }
+  }, [deletingMealId, loadMeals, mealPendingDelete, token]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <AmbientBackground variant="home" />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView ref={scrollViewRef} contentContainerStyle={styles.content}>
         <Text style={styles.title}>饮食记录</Text>
 
         <View style={styles.heroCard}>
@@ -365,7 +630,7 @@ export default function RecordScreen() {
               <Sparkle size={14} color={palette.orange500} weight="fill" />
               <Text style={styles.heroBadgeText}>{meals.length} 餐已记录</Text>
             </View>
-          </View>
+            </View>
 
           <View style={styles.metricGrid}>
             <NutritionMetric label="热量" value={todayTotals.calories} unit="kcal" styles={styles} />
@@ -385,182 +650,332 @@ export default function RecordScreen() {
           ) : null}
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>选择录入</Text>
-          <Text style={styles.cardHint}>不再手动输入食物名和克重，直接从食物库选择并自动带出平均营养值。</Text>
-
-          <Text style={styles.sectionLabel}>1. 选择餐次</Text>
-          <View style={styles.mealTypeRow}>
-            {MEAL_OPTIONS.map((option) => {
-              const Icon = option.icon;
-              const active = mealType === option.value;
-              return (
-                <Pressable
-                  key={option.value}
-                  style={[
-                    styles.mealTypeCard,
-                    active && {
-                      borderColor: option.tint,
-                      backgroundColor: isDark ? option.surfaceTintDark : option.surfaceTintLight,
-                    },
-                  ]}
-	                  onPress={() => {
-	                    if (saving) {
-	                      return;
-	                    }
-	                    setMealType(option.value);
-	                    setDraftRequestId(createClientRequestId());
-	                  }}
-                >
-                  <View style={[styles.mealTypeIconWrap, active && { backgroundColor: option.tint }]}>
-                    <Icon size={18} color={active ? (isDark ? palette.surface : palette.white) : option.tint} weight="fill" />
-                  </View>
-                  <Text style={styles.mealTypeTitle}>{option.label}</Text>
-                  <Text style={styles.mealTypeCaption}>{option.caption}</Text>
-                </Pressable>
-              );
-            })}
+        <View style={styles.aiEntryCard}>
+          <View style={styles.aiEntryCopy}>
+            <Text style={styles.aiEntryEyebrow}>AI 识别</Text>
+            <Text style={styles.aiEntryTitle}>拍照导入餐次</Text>
+            <Text style={styles.aiEntryText}>
+              识别流程会先估计食物和份量，再映射到营养库，适合快速演示和补录。
+            </Text>
           </View>
-
-          <Text style={styles.sectionLabel}>2. 选择食物分类</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.categoryRow}
-          >
-            {FOOD_CATEGORIES.map((category) => {
-              const active = selectedCategory === category.value;
-              return (
-                <Pressable
-                  key={category.value}
-                  style={[styles.categoryChip, active && styles.categoryChipActive]}
-                  onPress={() => setSelectedCategory(category.value)}
-                >
-                  <Text style={[styles.categoryChipLabel, active && styles.categoryChipLabelActive]}>
-                    {category.label}
-                  </Text>
-                  <Text style={[styles.categoryChipHint, active && styles.categoryChipHintActive]}>
-                    {category.hint}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-
-          <Text style={styles.sectionLabel}>3. 选择食物</Text>
-          <View style={styles.foodGrid}>
-            {visibleFoods.map((food) => {
-              const active = selectedFood?.id === food.id;
-              return (
-                <Pressable
-                  key={food.id}
-                  style={[styles.foodCard, active && styles.foodCardActive]}
-                  onPress={() => setSelectedFoodId(food.id)}
-                >
-                  <View style={[styles.foodIconWrap, active && styles.foodIconWrapActive]}>
-                    {renderFoodIcon(food.icon, active ? (isDark ? palette.surface : palette.white) : palette.orange500, 18)}
-                  </View>
-                  <Text style={styles.foodName}>{food.name}</Text>
-                  <Text style={styles.foodHint}>{food.portionHint}</Text>
-                  <Text style={styles.foodMacro}>蛋白 {formatNutritionValue(food.nutritionPer100g.protein)}g / 100g</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          {selectedFood ? (
-            <View style={styles.selectionPreview}>
-              <View style={styles.selectionPreviewHeader}>
-                <View>
-                  <Text style={styles.selectionPreviewTitle}>{selectedFood.name}</Text>
-                  <Text style={styles.selectionPreviewHint}>{selectedFood.portionHint}</Text>
-                </View>
-                <View style={styles.selectionPreviewBadge}>
-                  <Text style={styles.selectionPreviewBadgeText}>{selectedWeight}g</Text>
-                </View>
-              </View>
-              <View style={styles.metricGrid}>
-                <NutritionMetric label="热量" value={selectedPortionNutrition.calories} unit="kcal" styles={styles} subtle />
-                <NutritionMetric label="蛋白" value={selectedPortionNutrition.protein} unit="g" styles={styles} subtle />
-                <NutritionMetric label="脂肪" value={selectedPortionNutrition.fat} unit="g" styles={styles} subtle />
-                <NutritionMetric label="碳水" value={selectedPortionNutrition.carbs} unit="g" styles={styles} subtle />
-              </View>
-            </View>
-          ) : null}
-
-          <Text style={styles.sectionLabel}>4. 选择重量</Text>
-          <View style={styles.weightRow}>
-            {FOOD_WEIGHT_OPTIONS.map((weight) => {
-              const active = selectedWeight === weight;
-              return (
-                <Pressable
-                  key={weight}
-                  style={[styles.weightChip, active && styles.weightChipActive]}
-                  onPress={() => setSelectedWeight(weight)}
-                >
-                  <Text style={[styles.weightChipText, active && styles.weightChipTextActive]}>{weight}g</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <Pressable style={styles.addButton} onPress={handleAddItem}>
-            <Text style={styles.addButtonText}>加入本餐</Text>
+          <Pressable style={styles.aiEntryButton} onPress={() => router.push('/ai-recognize')}>
+            <Sparkle size={16} color={palette.white} weight="fill" />
+            <Text style={styles.aiEntryButtonText}>去识别</Text>
           </Pressable>
+        </View>
 
-          <View style={styles.draftCard}>
-            <View style={styles.draftHeader}>
-              <View>
-                <Text style={styles.draftTitle}>本餐草稿</Text>
-                <Text style={styles.draftHint}>先把食物加入当前餐次，再统一保存。</Text>
-              </View>
-              <View style={styles.draftBadge}>
-                <Text style={styles.draftBadgeText}>{items.length} 项</Text>
-              </View>
-            </View>
+        <View
+          style={styles.card}
+          onLayout={(event) => {
+            wizardCardOffsetRef.current = event.nativeEvent.layout.y;
+          }}
+        >
+          <Text style={styles.cardTitle}>选择录入</Text>
+          <Text style={styles.cardHint}>一步只看一个决策页，选完当前页再进入下一页。</Text>
 
-            {items.length === 0 ? (
-              <Text style={styles.emptyText}>还没有加入食物，先在上面点选一个菜品和克重。</Text>
-            ) : (
-              <View style={styles.draftList}>
-                {items.map((item, index) => {
-                  const actualNutrition = scaleNutrition(item.nutrition, item.weight_g);
-                  return (
-                    <View key={`${item.food_name}-${index}`} style={styles.draftItemRow}>
-                      <View style={styles.draftItemMain}>
-                        <Text style={styles.draftItemTitle}>
-                          {item.food_name} · {item.weight_g || 0}g
-                        </Text>
-                        <Text style={styles.draftItemMeta}>
-                          蛋白 {formatNutritionValue(actualNutrition.protein)}g · 脂肪 {formatNutritionValue(actualNutrition.fat)}g · 碳水{' '}
-                          {formatNutritionValue(actualNutrition.carbs)}g
-                        </Text>
-                      </View>
-                      <Pressable onPress={() => handleRemoveDraftItem(index)}>
-                        <XCircle size={20} color={palette.imperial500} weight="duotone" />
-                      </Pressable>
+          <View style={styles.wizardShell}>
+            <View style={styles.wizardHeader}>
+              <View style={styles.wizardHeaderTopRow}>
+                {canGoBack ? (
+                  <Pressable style={styles.wizardBackButton} onPress={handleWizardBack}>
+                    <CaretLeft size={16} color={palette.stone700} weight="bold" />
+                    <Text style={styles.wizardBackButtonText}>上一步</Text>
+                  </Pressable>
+                ) : (
+                  <View style={styles.wizardBackPlaceholder} />
+                )}
+
+                {items.length > 0 && wizardStep !== 'draft' ? (
+                  <Pressable style={styles.wizardDraftButton} onPress={handleOpenDraft}>
+                    <Text style={styles.wizardDraftButtonText}>草稿 {items.length} 项</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+
+              <Text style={styles.wizardEyebrow}>{wizardMeta.eyebrow}</Text>
+              <Text style={styles.wizardTitle}>{wizardMeta.title}</Text>
+              <Text style={styles.wizardSubtitle}>{wizardMeta.subtitle}</Text>
+
+              {wizardStep !== 'draft' ? (
+                <View style={styles.wizardProgressRow}>
+                  {WIZARD_STEP_ORDER.map((step, index) => {
+                    const active = step === wizardStep;
+                    const completed = index < wizardProgressIndex - 1;
+                    return (
+                      <View
+                        key={step}
+                        style={[
+                          styles.wizardProgressDot,
+                          completed && styles.wizardProgressDotCompleted,
+                          active && styles.wizardProgressDotActive,
+                        ]}
+                      />
+                    );
+                  })}
+                </View>
+              ) : null}
+
+              {wizardContextPills.length > 0 ? (
+                <View style={styles.wizardContextRow}>
+                  {wizardContextPills.map((pill) => (
+                    <View key={pill} style={styles.wizardContextPill}>
+                      <Text style={styles.wizardContextPillText}>{pill}</Text>
                     </View>
-                  );
-                })}
-              </View>
-            )}
-
-            <View style={styles.draftMacros}>
-              <MacroChip label="蛋白" value={draftTotals.protein} styles={styles} />
-              <MacroChip label="脂肪" value={draftTotals.fat} styles={styles} />
-              <MacroChip label="碳水" value={draftTotals.carbs} styles={styles} />
-              <MacroChip label="热量" value={draftTotals.calories} styles={styles} />
+                  ))}
+                </View>
+              ) : null}
             </View>
 
-            {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
+            <Animated.View style={[styles.wizardStage, { minHeight: wizardStageMinHeight }]} layout={LinearTransition.duration(220)}>
+              <Animated.View
+                key={`${wizardStep}-${draftAccessMode ?? 'default'}`}
+                entering={wizardEntering}
+                exiting={wizardExiting}
+                style={styles.wizardPane}
+              >
+                {wizardStep === 'meal' ? (
+                  <View style={styles.mealTypeRow}>
+                    {MEAL_OPTIONS.map((option) => {
+                      const Icon = option.icon;
+                      const active = mealType === option.value;
+                      return (
+                        <Pressable
+                          key={option.value}
+                          style={[
+                            styles.mealTypeCard,
+                            active && {
+                              borderColor: option.tint,
+                              backgroundColor: isDark ? option.surfaceTintDark : option.surfaceTintLight,
+                            },
+                          ]}
+                          onPress={() => handleMealTypeSelect(option.value)}
+                        >
+                          <View style={[styles.mealTypeIconWrap, active && { backgroundColor: option.tint }]}>
+                            <Icon
+                              size={18}
+                              color={active ? (isDark ? palette.surface : palette.white) : option.tint}
+                              weight="fill"
+                            />
+                          </View>
+                          <Text style={styles.mealTypeTitle}>{option.label}</Text>
+                          <Text style={styles.mealTypeCaption}>{option.caption}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : null}
 
-            <Pressable
-              style={[styles.primaryButton, (items.length === 0 || saving) && styles.primaryButtonDisabled]}
-              onPress={handleSubmit}
-              disabled={items.length === 0 || saving}
-            >
-              <Text style={styles.primaryButtonText}>{saving ? '保存中...' : '保存餐次'}</Text>
-            </Pressable>
+                {wizardStep === 'category' ? (
+                  <View>
+                    <View style={styles.sectionHeaderRow}>
+                      <Text style={styles.sectionLabel}>食物分类</Text>
+                      {hiddenCategoryCount > 0 ? (
+                        <Pressable style={styles.sectionMoreButton} onPress={handleShowMoreCategories}>
+                          <Text style={styles.sectionMoreButtonText}>更多分类 +{hiddenCategoryCount}</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                    <View style={styles.categoryGrid}>
+                      {displayedCategories.map((category) => {
+                        const active = selectedCategory === category.value;
+                        return (
+                          <Pressable
+                            key={category.value}
+                            style={[styles.categoryChip, active && styles.categoryChipActive]}
+                            onPress={() => handleCategorySelect(category.value)}
+                          >
+                            <Text style={[styles.categoryChipLabel, active && styles.categoryChipLabelActive]}>
+                              {category.label}
+                            </Text>
+                            <Text style={[styles.categoryChipHint, active && styles.categoryChipHintActive]}>
+                              {category.hint}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ) : null}
+
+                {wizardStep === 'food' ? (
+                  <View>
+                    <View style={styles.sectionHeaderRow}>
+                      <Text style={styles.sectionLabel}>{selectedCategoryOption.label}</Text>
+                      {hiddenFoodCount > 0 ? (
+                        <Pressable style={styles.sectionMoreButton} onPress={handleShowMoreFoods}>
+                          <Text style={styles.sectionMoreButtonText}>更多食物 +{hiddenFoodCount}</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                    <View style={styles.foodGrid}>
+                      {displayedFoods.map((food) => {
+                        const active = selectedFood?.id === food.id;
+                        return (
+                          <Pressable
+                            key={food.id}
+                            style={[styles.foodCard, active && styles.foodCardActive]}
+                            onPress={() => handleFoodSelect(food.id)}
+                          >
+                            <View style={[styles.foodIconWrap, active && styles.foodIconWrapActive]}>
+                              {renderFoodIcon(
+                                food.icon,
+                                active ? (isDark ? palette.surface : palette.white) : palette.orange500,
+                                18,
+                              )}
+                            </View>
+                            <Text style={styles.foodName}>{food.name}</Text>
+                            <Text style={styles.foodHint}>{food.portionHint}</Text>
+                            <Text style={styles.foodMacro}>
+                              蛋白 {formatNutritionValue(food.nutritionPer100g.protein)}g / 100g
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ) : null}
+
+                {wizardStep === 'weight' && selectedFood ? (
+                  <View>
+                    <View style={styles.selectionPreview}>
+                      <View style={styles.selectionPreviewHeader}>
+                        <View>
+                          <Text style={styles.selectionPreviewTitle}>{selectedFood.name}</Text>
+                          <Text style={styles.selectionPreviewHint}>{selectedFood.portionHint}</Text>
+                        </View>
+                        <View style={styles.selectionPreviewBadge}>
+                          <Text style={styles.selectionPreviewBadgeText}>{selectedWeight}g</Text>
+                        </View>
+                      </View>
+                      <View style={styles.metricGrid}>
+                        <NutritionMetric label="热量" value={selectedPortionNutrition.calories} unit="kcal" styles={styles} subtle />
+                        <NutritionMetric label="蛋白" value={selectedPortionNutrition.protein} unit="g" styles={styles} subtle />
+                        <NutritionMetric label="脂肪" value={selectedPortionNutrition.fat} unit="g" styles={styles} subtle />
+                        <NutritionMetric label="碳水" value={selectedPortionNutrition.carbs} unit="g" styles={styles} subtle />
+                      </View>
+                    </View>
+
+                    <Text style={styles.sectionLabel}>选择重量</Text>
+                    <View style={styles.weightRow}>
+                      {FOOD_WEIGHT_OPTIONS.map((weight) => {
+                        const active = selectedWeight === weight;
+                        return (
+                          <Pressable
+                            key={weight}
+                            style={[styles.weightChip, active && styles.weightChipActive]}
+                            onPress={() => handleWeightSelect(weight)}
+                          >
+                            <Text style={[styles.weightChipText, active && styles.weightChipTextActive]}>{weight}g</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ) : null}
+
+                {wizardStep === 'review' && selectedFood ? (
+                  <View style={styles.reviewWrap}>
+                    <View style={styles.selectionPreview}>
+                      <View style={styles.selectionPreviewHeader}>
+                        <View>
+                          <Text style={styles.selectionPreviewTitle}>{selectedFood.name}</Text>
+                          <Text style={styles.selectionPreviewHint}>
+                            {currentMealOption.label} · {selectedCategoryOption.label}
+                          </Text>
+                        </View>
+                        <View style={styles.selectionPreviewBadge}>
+                          <Text style={styles.selectionPreviewBadgeText}>{selectedWeight}g</Text>
+                        </View>
+                      </View>
+                      <View style={styles.metricGrid}>
+                        <NutritionMetric label="热量" value={selectedPortionNutrition.calories} unit="kcal" styles={styles} subtle />
+                        <NutritionMetric label="蛋白" value={selectedPortionNutrition.protein} unit="g" styles={styles} subtle />
+                        <NutritionMetric label="脂肪" value={selectedPortionNutrition.fat} unit="g" styles={styles} subtle />
+                        <NutritionMetric label="碳水" value={selectedPortionNutrition.carbs} unit="g" styles={styles} subtle />
+                      </View>
+                    </View>
+
+                    <Pressable style={styles.primaryButton} onPress={handleAddCurrentSelection}>
+                      <Text style={styles.primaryButtonText}>加入本餐</Text>
+                    </Pressable>
+
+                    {items.length > 0 ? (
+                      <Pressable style={styles.secondaryButton} onPress={handleOpenDraft}>
+                        <Text style={styles.secondaryButtonText}>先看草稿</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ) : null}
+
+                {wizardStep === 'draft' ? (
+                  <View style={styles.draftCard}>
+                    <View style={styles.draftHeader}>
+                      <View>
+                        <Text style={styles.draftTitle}>本餐草稿</Text>
+                        <Text style={styles.draftHint}>这里是待保存的餐次内容，确认后统一提交。</Text>
+                      </View>
+                      <View style={styles.draftBadge}>
+                        <Text style={styles.draftBadgeText}>{items.length} 项</Text>
+                      </View>
+                    </View>
+
+                    {items.length === 0 ? (
+                      <View style={styles.emptyDraftState}>
+                        <Text style={styles.emptyText}>还没有加入食物，回到选择流程继续添加。</Text>
+                        <Pressable style={styles.secondaryButton} onPress={handleContinueAdding}>
+                          <Text style={styles.secondaryButtonText}>重新选择食物</Text>
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <View style={styles.draftList}>
+                        {items.map((item, index) => {
+                          const actualNutrition = scaleNutrition(item.nutrition, item.weight_g);
+                          return (
+                            <View key={`${item.food_name}-${index}`} style={styles.draftItemRow}>
+                              <View style={styles.draftItemMain}>
+                                <Text style={styles.draftItemTitle}>
+                                  {item.food_name} · {item.weight_g || 0}g
+                                </Text>
+                                <Text style={styles.draftItemMeta}>
+                                  蛋白 {formatNutritionValue(actualNutrition.protein)}g · 脂肪 {formatNutritionValue(actualNutrition.fat)}g · 碳水{' '}
+                                  {formatNutritionValue(actualNutrition.carbs)}g
+                                </Text>
+                              </View>
+                              <Pressable onPress={() => handleRemoveDraftItem(index)}>
+                                <XCircle size={20} color={palette.imperial500} weight="duotone" />
+                              </Pressable>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    )}
+
+                    <View style={styles.draftMacros}>
+                      <MacroChip label="蛋白" value={draftTotals.protein} styles={styles} />
+                      <MacroChip label="脂肪" value={draftTotals.fat} styles={styles} />
+                      <MacroChip label="碳水" value={draftTotals.carbs} styles={styles} />
+                      <MacroChip label="热量" value={draftTotals.calories} styles={styles} />
+                    </View>
+
+                    {items.length > 0 ? (
+                      <Pressable style={styles.secondaryButton} onPress={handleContinueAdding}>
+                        <Text style={styles.secondaryButtonText}>继续添加食物</Text>
+                      </Pressable>
+                    ) : null}
+
+                    {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
+
+                    <Pressable
+                      style={[styles.primaryButton, (items.length === 0 || saving) && styles.primaryButtonDisabled]}
+                      onPress={handleSubmit}
+                      disabled={items.length === 0 || saving}
+                    >
+                      <Text style={styles.primaryButtonText}>{saving ? '保存中...' : '保存餐次'}</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </Animated.View>
+            </Animated.View>
           </View>
         </View>
 
@@ -570,10 +985,16 @@ export default function RecordScreen() {
               <Text style={styles.cardTitle}>今日餐次</Text>
               <Text style={styles.cardHint}>每一餐都会显示时间、营养概览和食物组成。</Text>
             </View>
+            <View style={styles.savedHeaderActions}>
+            <Pressable style={styles.historyEntryButton} onPress={() => router.push('/meal-history')}>
+              <ClockCounterClockwise size={14} color={palette.orange500} weight="bold" />
+              <Text style={styles.historyEntryButtonText}>历史卡片</Text>
+            </Pressable>
             <View style={styles.savedBadge}>
               <Clock size={14} color={palette.blue500} weight="duotone" />
               <Text style={styles.savedBadgeText}>{meals.length} 张卡片</Text>
             </View>
+          </View>
           </View>
           {meals.length === 0 ? (
             <Text style={styles.emptyText}>今天还没有记录，先在上面挑一餐试试。</Text>
@@ -606,9 +1027,12 @@ export default function RecordScreen() {
                           <Text style={styles.mealCardCaloriesText}>{Math.round(totals.calories)} kcal</Text>
                         </View>
                         <Pressable
-                          style={styles.mealCardDeleteButton}
+                          style={[
+                            styles.mealCardDeleteButton,
+                            (saving || deletingMealId !== null) && styles.mealCardDeleteButtonDisabled,
+                          ]}
                           onPress={() => handleDeleteMeal(meal)}
-                          disabled={saving}
+                          disabled={saving || deletingMealId !== null}
                         >
                           <Trash size={14} color={palette.imperial500} weight="bold" />
                           <Text style={styles.mealCardDeleteText}>删除</Text>
@@ -646,6 +1070,109 @@ export default function RecordScreen() {
         onTrend={() => router.replace('/(tabs)/trend')}
         onProfile={() => router.replace('/(tabs)/settings')}
       />
+      <Modal
+        visible={!!mealPendingDelete}
+        transparent
+        animationType="fade"
+        onRequestClose={closeDeleteModal}
+      >
+        <Pressable style={styles.deleteModalMask} onPress={closeDeleteModal}>
+          <Pressable style={styles.deleteModalCard} onPress={() => {}}>
+            <View style={styles.deleteModalHeader}>
+              <View style={styles.deleteModalIconWrap}>
+                <Trash size={22} color={palette.imperial500} weight="fill" />
+              </View>
+              <View style={styles.deleteModalTextWrap}>
+                <Text style={styles.deleteModalEyebrow}>危险操作</Text>
+                <Text style={styles.deleteModalTitle}>删除餐次</Text>
+                <Text style={styles.deleteModalMessage}>
+                  删除后无法恢复，这条餐次记录里的食物和营养统计会一起移除。
+                </Text>
+              </View>
+            </View>
+
+            {mealPendingDelete && pendingDeleteOption && PendingDeleteIcon ? (
+              <View style={styles.deleteSummaryCard}>
+                <View style={styles.deleteSummaryHeader}>
+                  <View style={styles.deleteSummaryMain}>
+                    <View
+                      style={[
+                        styles.deleteSummaryIconWrap,
+                        {
+                          backgroundColor: isDark
+                            ? pendingDeleteOption.surfaceTintDark
+                            : pendingDeleteOption.surfaceTintLight,
+                        },
+                      ]}
+                    >
+                      <PendingDeleteIcon size={18} color={pendingDeleteOption.tint} weight="fill" />
+                    </View>
+                    <View style={styles.deleteSummaryTextWrap}>
+                      <Text style={styles.deleteSummaryTitle}>{pendingDeleteOption.label}</Text>
+                      <Text style={styles.deleteSummarySubtitle}>
+                        {formatTimeLabel(mealPendingDelete.eaten_at)}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.deleteSummaryCalories}>
+                    <Fire size={14} color={palette.orange500} weight="fill" />
+                    <Text style={styles.deleteSummaryCaloriesText}>
+                      {Math.round(pendingDeleteTotals.calories)} kcal
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.deleteSummaryMetaRow}>
+                  <View style={styles.deleteSummaryMetaPill}>
+                    <Text style={styles.deleteSummaryMetaPillText}>
+                      {mealPendingDelete.items.length} 项食物
+                    </Text>
+                  </View>
+                  <View style={styles.deleteSummaryMetaPill}>
+                    <Text style={styles.deleteSummaryMetaPillText}>
+                      蛋白 {formatNutritionValue(pendingDeleteTotals.protein)}g
+                    </Text>
+                  </View>
+                  <View style={styles.deleteSummaryMetaPill}>
+                    <Text style={styles.deleteSummaryMetaPillText}>
+                      碳水 {formatNutritionValue(pendingDeleteTotals.carbs)}g
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ) : null}
+
+            {deleteErrorText ? <Text style={styles.deleteModalErrorText}>{deleteErrorText}</Text> : null}
+
+            <View style={styles.deleteModalActionRow}>
+              <Pressable
+                style={[
+                  styles.deleteModalSecondaryButton,
+                  deletingMealId !== null && styles.deleteModalSecondaryButtonDisabled,
+                ]}
+                onPress={closeDeleteModal}
+                disabled={deletingMealId !== null}
+              >
+                <Text style={styles.deleteModalSecondaryButtonText}>取消</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.deleteModalDangerButton,
+                  deletingMealId !== null && styles.deleteModalDangerButtonDisabled,
+                ]}
+                onPress={() => {
+                  void confirmDeleteMeal();
+                }}
+                disabled={deletingMealId !== null}
+              >
+                <Text style={styles.deleteModalDangerButtonText}>
+                  {deletingMealId !== null ? '删除中...' : '确认删除'}
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -664,6 +1191,9 @@ function createStyles(palette: Palette, isDark: boolean) {
   const badgeBorder = isDark ? 'rgba(255, 140, 66, 0.18)' : palette.gold100;
   const primarySurface = isDark ? palette.orange500 : palette.stone900;
   const primaryText = isDark ? palette.surface : palette.gold50;
+  const destructiveSurface = isDark ? 'rgba(239, 71, 111, 0.16)' : palette.imperial50;
+  const destructiveBorder = isDark ? 'rgba(239, 71, 111, 0.24)' : palette.imperial100;
+  const modalMask = isDark ? 'rgba(7, 6, 6, 0.56)' : 'rgba(30, 27, 24, 0.28)';
 
   return StyleSheet.create({
     safeArea: {
@@ -803,11 +1333,189 @@ function createStyles(palette: Palette, isDark: boolean) {
       lineHeight: 19,
       color: palette.stone500,
     },
+    aiEntryCard: {
+      borderRadius: 24,
+      padding: 18,
+      backgroundColor: isDark ? 'rgba(22, 24, 20, 0.78)' : palette.white,
+      borderWidth: 1,
+      borderColor: panelBorder,
+      gap: 14,
+    },
+    aiEntryCopy: {
+      gap: 6,
+    },
+    aiEntryEyebrow: {
+      fontSize: 11,
+      fontWeight: '800',
+      letterSpacing: 0.8,
+      textTransform: 'uppercase',
+      color: palette.orange500,
+    },
+    aiEntryTitle: {
+      fontSize: 20,
+      lineHeight: 26,
+      fontWeight: '800',
+      color: palette.stone900,
+    },
+    aiEntryText: {
+      fontSize: 13,
+      lineHeight: 20,
+      color: palette.stone500,
+    },
+    aiEntryButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      minHeight: 48,
+      borderRadius: 18,
+      backgroundColor: palette.orange500,
+    },
+    aiEntryButtonText: {
+      fontSize: 14,
+      fontWeight: '800',
+      color: isDark ? '#1A1714' : palette.white,
+    },
+    wizardShell: {
+      borderRadius: 24,
+      backgroundColor: isDark ? 'rgba(20, 18, 17, 0.58)' : 'rgba(255, 248, 241, 0.72)',
+      borderWidth: 1,
+      borderColor: panelBorder,
+      padding: 12,
+      gap: 12,
+    },
+    wizardHeader: {
+      gap: 8,
+    },
+    wizardHeaderTopRow: {
+      minHeight: 32,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    wizardBackButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+      borderRadius: 999,
+      backgroundColor: panelSurface,
+      borderWidth: 1,
+      borderColor: panelBorder,
+    },
+    wizardBackButtonText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.stone700,
+    },
+    wizardBackPlaceholder: {
+      width: 68,
+    },
+    wizardDraftButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      borderRadius: 999,
+      backgroundColor: badgeSurface,
+      borderWidth: 1,
+      borderColor: badgeBorder,
+    },
+    wizardDraftButtonText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.orange500,
+    },
+    wizardEyebrow: {
+      fontSize: 11,
+      fontWeight: '800',
+      letterSpacing: 0.8,
+      textTransform: 'uppercase',
+      color: palette.orange500,
+    },
+    wizardTitle: {
+      fontSize: 22,
+      lineHeight: 28,
+      fontWeight: '800',
+      color: palette.stone900,
+    },
+    wizardSubtitle: {
+      fontSize: 13,
+      lineHeight: 20,
+      color: palette.stone500,
+    },
+    wizardProgressRow: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    wizardProgressDot: {
+      flex: 1,
+      height: 6,
+      borderRadius: 999,
+      backgroundColor: isDark ? palette.stone300 : palette.stone200,
+    },
+    wizardProgressDotCompleted: {
+      backgroundColor: palette.orange500,
+      opacity: 0.45,
+    },
+    wizardProgressDotActive: {
+      backgroundColor: palette.orange500,
+      opacity: 1,
+    },
+    wizardContextRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    wizardContextPill: {
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+      borderRadius: 999,
+      backgroundColor: isDark ? palette.stone200 : palette.surfaceWarm,
+      borderWidth: 1,
+      borderColor: panelBorder,
+    },
+    wizardContextPillText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.stone700,
+    },
+    wizardStage: {
+      minHeight: 0,
+    },
+    wizardPane: {
+      gap: 12,
+    },
     sectionLabel: {
       fontSize: 13,
       fontWeight: '700',
       color: palette.stone700,
       marginTop: 2,
+    },
+    sectionHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    sectionMoreButton: {
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
+      backgroundColor: badgeSurface,
+      borderWidth: 1,
+      borderColor: badgeBorder,
+    },
+    sectionMoreButtonText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.orange500,
+    },
+    sectionTipText: {
+      marginTop: 8,
+      fontSize: 12,
+      lineHeight: 18,
+      color: palette.stone500,
     },
     mealTypeRow: {
       flexDirection: 'row',
@@ -840,12 +1548,14 @@ function createStyles(palette: Palette, isDark: boolean) {
       fontSize: 12,
       color: palette.stone500,
     },
-    categoryRow: {
+    categoryGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
       gap: 10,
-      paddingRight: 8,
+      marginTop: 10,
     },
     categoryChip: {
-      width: 128,
+      flexBasis: '47%',
       borderRadius: 18,
       paddingHorizontal: 14,
       paddingVertical: 12,
@@ -853,6 +1563,7 @@ function createStyles(palette: Palette, isDark: boolean) {
       borderWidth: 1,
       borderColor: panelBorder,
       gap: 4,
+      minHeight: 86,
     },
     categoryChipActive: {
       backgroundColor: activeSurface,
@@ -878,6 +1589,7 @@ function createStyles(palette: Palette, isDark: boolean) {
       flexDirection: 'row',
       flexWrap: 'wrap',
       gap: 10,
+      marginTop: 10,
     },
     foodCard: {
       flexBasis: '47%',
@@ -959,6 +1671,7 @@ function createStyles(palette: Palette, isDark: boolean) {
       flexDirection: 'row',
       flexWrap: 'wrap',
       gap: 10,
+      marginTop: 10,
     },
     weightChip: {
       minWidth: 68,
@@ -982,7 +1695,12 @@ function createStyles(palette: Palette, isDark: boolean) {
     weightChipTextActive: {
       color: palette.stone900,
     },
-    addButton: {
+    inlineHintText: {
+      fontSize: 12,
+      lineHeight: 18,
+      color: palette.stone500,
+    },
+    secondaryButton: {
       borderRadius: 18,
       paddingVertical: 14,
       alignItems: 'center',
@@ -990,10 +1708,13 @@ function createStyles(palette: Palette, isDark: boolean) {
       borderWidth: 1,
       borderColor: isDark ? palette.stone300 : palette.gold100,
     },
-    addButtonText: {
+    secondaryButtonText: {
       fontSize: 15,
       fontWeight: '700',
       color: palette.stone900,
+    },
+    reviewWrap: {
+      gap: 12,
     },
     draftCard: {
       borderRadius: 24,
@@ -1034,6 +1755,9 @@ function createStyles(palette: Palette, isDark: boolean) {
     },
     draftList: {
       gap: 10,
+    },
+    emptyDraftState: {
+      gap: 12,
     },
     draftItemRow: {
       flexDirection: 'row',
@@ -1108,6 +1832,26 @@ function createStyles(palette: Palette, isDark: boolean) {
       justifyContent: 'space-between',
       alignItems: 'flex-start',
       gap: 12,
+    },
+    savedHeaderActions: {
+      alignItems: 'flex-end',
+      gap: 8,
+    },
+    historyEntryButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+      borderRadius: 999,
+      backgroundColor: badgeSurface,
+      borderWidth: 1,
+      borderColor: badgeBorder,
+    },
+    historyEntryButtonText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.orange500,
     },
     savedBadge: {
       flexDirection: 'row',
@@ -1192,6 +1936,9 @@ function createStyles(palette: Palette, isDark: boolean) {
       borderRadius: 999,
       backgroundColor: isDark ? 'rgba(255, 99, 132, 0.12)' : palette.rose100,
     },
+    mealCardDeleteButtonDisabled: {
+      opacity: 0.5,
+    },
     mealCardDeleteText: {
       fontSize: 12,
       fontWeight: '700',
@@ -1219,6 +1966,176 @@ function createStyles(palette: Palette, isDark: boolean) {
       fontSize: 12,
       fontWeight: '600',
       color: palette.stone700,
+    },
+    deleteModalMask: {
+      flex: 1,
+      justifyContent: 'center',
+      paddingHorizontal: 22,
+      backgroundColor: modalMask,
+    },
+    deleteModalCard: {
+      borderRadius: 28,
+      padding: 20,
+      gap: 16,
+      backgroundColor: panelSurface,
+      borderWidth: 1,
+      borderColor: panelBorder,
+      shadowColor: '#000',
+      shadowOpacity: isDark ? 0.24 : 0.12,
+      shadowRadius: 20,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 8,
+    },
+    deleteModalHeader: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 14,
+    },
+    deleteModalIconWrap: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: destructiveSurface,
+      borderWidth: 1,
+      borderColor: destructiveBorder,
+    },
+    deleteModalTextWrap: {
+      flex: 1,
+      gap: 4,
+    },
+    deleteModalEyebrow: {
+      fontSize: 12,
+      fontWeight: '800',
+      color: palette.imperial500,
+      letterSpacing: 0.3,
+    },
+    deleteModalTitle: {
+      fontSize: 22,
+      fontWeight: '800',
+      color: palette.stone900,
+    },
+    deleteModalMessage: {
+      fontSize: 14,
+      lineHeight: 22,
+      color: palette.stone600,
+    },
+    deleteSummaryCard: {
+      borderRadius: 20,
+      padding: 14,
+      gap: 12,
+      backgroundColor: panelSurfaceAlt,
+      borderWidth: 1,
+      borderColor: panelBorder,
+    },
+    deleteSummaryHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    deleteSummaryMain: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      flex: 1,
+    },
+    deleteSummaryIconWrap: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    deleteSummaryTextWrap: {
+      flex: 1,
+    },
+    deleteSummaryTitle: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: palette.stone900,
+    },
+    deleteSummarySubtitle: {
+      marginTop: 4,
+      fontSize: 12,
+      color: palette.stone500,
+    },
+    deleteSummaryCalories: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
+      backgroundColor: badgeSurface,
+    },
+    deleteSummaryCaloriesText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.orange500,
+    },
+    deleteSummaryMetaRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    deleteSummaryMetaPill: {
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+      borderRadius: 999,
+      backgroundColor: chipSurface,
+    },
+    deleteSummaryMetaPillText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.stone700,
+    },
+    deleteModalErrorText: {
+      fontSize: 13,
+      lineHeight: 18,
+      color: palette.imperial500,
+    },
+    deleteModalActionRow: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    deleteModalSecondaryButton: {
+      flex: 1,
+      borderRadius: 16,
+      paddingVertical: 14,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: panelBorder,
+      backgroundColor: isDark ? palette.stone100 : palette.white,
+    },
+    deleteModalSecondaryButtonText: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: palette.stone700,
+    },
+    deleteModalSecondaryButtonDisabled: {
+      opacity: 0.5,
+    },
+    deleteModalDangerButton: {
+      flex: 1,
+      borderRadius: 16,
+      paddingVertical: 14,
+      alignItems: 'center',
+      backgroundColor: palette.imperial500,
+      shadowColor: palette.imperial500,
+      shadowOpacity: isDark ? 0.2 : 0.16,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 4,
+    },
+    deleteModalDangerButtonDisabled: {
+      opacity: 0.72,
+    },
+    deleteModalDangerButtonText: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: isDark ? '#1A1714' : palette.white,
     },
   });
 }
