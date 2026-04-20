@@ -27,8 +27,8 @@ services:
 
   backend:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: backend/Dockerfile
       args:
         PYTHON_IMAGE: python:3.11-slim
     env_file:

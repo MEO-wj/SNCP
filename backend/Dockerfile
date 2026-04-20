@@ -9,10 +9,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN pip install --no-cache-dir uv -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-COPY pyproject.toml uv.lock ./
+COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev --index https://pypi.tuna.tsinghua.edu.cn/simple
 
-COPY . .
+COPY backend /app/backend
+COPY ai_end /app/ai_end
 
 EXPOSE 4420
 
