@@ -9,6 +9,7 @@ export async function fetchRecipes(token: string, keyword?: string, tag?: string
   if (tag) {
     params.set('tag', tag);
   }
+
   const query = params.toString();
   const resp = await fetch(`${getApiBaseUrl()}/recipes${query ? `?${query}` : ''}`, {
     headers: {
@@ -16,9 +17,11 @@ export async function fetchRecipes(token: string, keyword?: string, tag?: string
       ...buildAuthHeaders(token),
     },
   });
+
   if (!resp.ok) {
     throw new Error('获取食谱失败');
   }
+
   return (await resp.json()) as { recipes: Recipe[] };
 }
 
@@ -31,10 +34,13 @@ export async function createRecipe(token: string, payload: Partial<Recipe>) {
     },
     body: JSON.stringify(payload),
   });
+
   if (!resp.ok) {
-    throw new Error('创建食谱失败');
+    const data = (await resp.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(data?.error || '创建食谱失败');
   }
-  return (await resp.json()) as { recipe: Recipe };
+
+  return (await resp.json()) as { recipe: Recipe; created: boolean };
 }
 
 export async function updateRecipe(token: string, recipeId: number, payload: Partial<Recipe>) {
@@ -46,9 +52,11 @@ export async function updateRecipe(token: string, recipeId: number, payload: Par
     },
     body: JSON.stringify(payload),
   });
+
   if (!resp.ok) {
     throw new Error('更新食谱失败');
   }
+
   return (await resp.json()) as { recipe: Recipe };
 }
 
@@ -60,8 +68,10 @@ export async function deleteRecipe(token: string, recipeId: number) {
       ...buildAuthHeaders(token),
     },
   });
+
   if (!resp.ok) {
     throw new Error('删除食谱失败');
   }
+
   return (await resp.json()) as { deleted: boolean };
 }

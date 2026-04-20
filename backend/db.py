@@ -115,8 +115,12 @@ def init_db() -> None:
         """
         CREATE TABLE IF NOT EXISTS recipes (
             id BIGSERIAL PRIMARY KEY,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
             name TEXT NOT NULL,
             cuisine TEXT,
+            cover_url TEXT,
+            source_url TEXT,
+            source_provider TEXT,
             tags TEXT[] NOT NULL DEFAULT '{}',
             ingredients JSONB NOT NULL DEFAULT '[]'::jsonb,
             steps JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -126,7 +130,12 @@ def init_db() -> None:
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
         """,
+        "ALTER TABLE recipes ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;",
+        "ALTER TABLE recipes ADD COLUMN IF NOT EXISTS cover_url TEXT;",
+        "ALTER TABLE recipes ADD COLUMN IF NOT EXISTS source_url TEXT;",
+        "ALTER TABLE recipes ADD COLUMN IF NOT EXISTS source_provider TEXT;",
         "CREATE INDEX IF NOT EXISTS recipes_name_idx ON recipes(name);",
+        "CREATE INDEX IF NOT EXISTS recipes_user_idx ON recipes(user_id, updated_at DESC, id DESC);",
         """
         CREATE TABLE IF NOT EXISTS health_rules (
             id BIGSERIAL PRIMARY KEY,
