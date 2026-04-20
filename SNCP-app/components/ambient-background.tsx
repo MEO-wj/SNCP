@@ -17,7 +17,7 @@ export function AmbientBackground({ variant }: AmbientBackgroundProps) {
 
   if (variant === 'home') {
     return (
-      <View style={styles.ambientBg}>
+      <View pointerEvents="none" style={styles.ambientBg}>
         <LinearGradient
           colors={[palette.surface, palette.surfaceWarm]}
           start={{ x: 0, y: 0 }}
@@ -33,7 +33,7 @@ export function AmbientBackground({ variant }: AmbientBackgroundProps) {
 
   if (variant === 'explore') {
     return (
-      <View style={styles.ambientBg}>
+      <View pointerEvents="none" style={styles.ambientBg}>
         <View style={[styles.orb, styles.orbGold]} />
         <View style={[styles.orb, styles.orbRed]} />
         <View style={[styles.orb, styles.orbWarmExplore]} />

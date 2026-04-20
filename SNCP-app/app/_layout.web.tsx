@@ -187,6 +187,9 @@ export default function RootLayout() {
         <Stack.Screen name="login" options={{ headerShown: false }} />
         <Stack.Screen name="register" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="ai-recognize" options={{ headerShown: false }} />
+        <Stack.Screen name="meal-history" options={{ headerShown: false }} />
+        <Stack.Screen name="recipes/[postId]" options={{ headerShown: false }} />
       </Stack>
       <StatusBar style="auto" />
     </ThemeProvider>

@@ -35,6 +35,14 @@
     "plugins": [
       "expo-router",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "允许食伴访问照片，用于识别食物并生成营养记录。",
+          "cameraPermission": "允许食伴使用相机，用于拍照识别食物并生成营养记录。",
+          "microphonePermission": false
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/images/icon-pot-hero.png",

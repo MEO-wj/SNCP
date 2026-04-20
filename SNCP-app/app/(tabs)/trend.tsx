@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AmbientBackground } from '@/components/ambient-background';
 import { BottomDock } from '@/components/bottom-dock';
@@ -22,23 +22,45 @@ export default function TrendScreen() {
   const styles = useMemo(() => createStyles(palette), [palette]);
 
   const [trend, setTrend] = useState<TrendItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [errorText, setErrorText] = useState('');
 
-  useEffect(() => {
+  const loadTrend = useCallback(async () => {
     if (!token) {
+      setTrend([]);
+      setErrorText('登录状态失效，请重新登录后再查看趋势。');
       return;
     }
-    fetchNutritionTrend(token, 30)
-      .then((res) => setTrend((res.trend || []).slice().reverse()))
-      .catch((error) => console.error('[Trend] failed', error));
+    setLoading(true);
+    try {
+      const res = await fetchNutritionTrend(token, 30);
+      setTrend((res.trend || []).slice().reverse());
+      setErrorText('');
+    } catch (error) {
+      console.error('[Trend] failed', error);
+      setErrorText(error instanceof Error ? error.message : '趋势刷新失败，请稍后重试。');
+    } finally {
+      setLoading(false);
+    }
   }, [token]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadTrend();
+    }, [loadTrend]),
+  );
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <AmbientBackground variant="home" />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadTrend} />}
+      >
         <Text style={styles.title}>长期趋势</Text>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>近30天热量趋势</Text>
+          {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
           {trend.length === 0 ? (
             <Text style={styles.emptyText}>暂无趋势数据。</Text>
           ) : (
@@ -99,6 +121,10 @@ function createStyles(palette: Palette) {
     emptyText: {
       fontSize: 14,
       color: palette.stone500,
+    },
+    errorText: {
+      fontSize: 13,
+      color: palette.imperial500,
     },
     trendRow: {
       flexDirection: 'row',

@@ -1,4 +1,20 @@
 import { buildAuthHeaders, getApiBaseUrl } from '@/services/api';
+import type {
+  AiNutritionResult,
+  AiRecognitionResult,
+  AiRecommendationResult,
+} from '@/types/ai';
+
+async function buildApiError(resp: Response, fallbackMessage: string): Promise<never> {
+  let message = fallbackMessage;
+  try {
+    const payload = (await resp.json()) as { error?: string; message?: string };
+    message = payload.error || payload.message || fallbackMessage;
+  } catch {
+    message = fallbackMessage;
+  }
+  throw new Error(message);
+}
 
 export async function recognizeFoods(
   token: string,
@@ -13,16 +29,12 @@ export async function recognizeFoods(
     body: JSON.stringify(payload),
   });
   if (!resp.ok) {
-    throw new Error('识别失败');
+    await buildApiError(resp, '识别失败');
   }
-  return (await resp.json()) as {
-    items: Array<{ name: string; category?: string; confidence?: number; weight_g?: number }>;
-    provider: string;
-    message?: string;
-  };
+  return (await resp.json()) as AiRecognitionResult;
 }
 
-export async function analyzeNutrition(token: string, items: Array<Record<string, unknown>>) {
+export async function analyzeNutrition(token: string, items: Record<string, unknown>[]) {
   const resp = await fetch(`${getApiBaseUrl()}/ai/analyze`, {
     method: 'POST',
     headers: {
@@ -32,16 +44,9 @@ export async function analyzeNutrition(token: string, items: Array<Record<string
     body: JSON.stringify({ items }),
   });
   if (!resp.ok) {
-    throw new Error('分析失败');
+    await buildApiError(resp, '分析失败');
   }
-  return (await resp.json()) as {
-    totals: Record<string, number>;
-    macro_ratio: Record<string, number>;
-    goal_checks: Array<Record<string, unknown>>;
-    warnings: string[];
-    suggestions: string[];
-    ai: Record<string, unknown>;
-  };
+  return (await resp.json()) as AiNutritionResult;
 }
 
 export async function recommendRecipes(token: string, payload: Record<string, unknown>) {
@@ -54,7 +59,7 @@ export async function recommendRecipes(token: string, payload: Record<string, un
     body: JSON.stringify(payload),
   });
   if (!resp.ok) {
-    throw new Error('推荐失败');
+    await buildApiError(resp, '推荐失败');
   }
-  return (await resp.json()) as { items: Array<Record<string, unknown>>; provider: string };
+  return (await resp.json()) as AiRecommendationResult;
 }

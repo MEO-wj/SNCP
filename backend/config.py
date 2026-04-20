@@ -38,6 +38,17 @@ class Config:
         self.ai_nutrition_analysis_key: Optional[str] = None
         self.ai_recipe_recommend_url: Optional[str] = None
         self.ai_recipe_recommend_key: Optional[str] = None
+        self.zhipu_api_key: Optional[str] = None
+        self.zhipu_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+        self.zhipu_vision_model: str = "glm-4.6v"
+        self.zhipu_text_model: str = "glm-4.7"
+        self.themealdb_base_url: str = "https://www.themealdb.com/api"
+        self.themealdb_api_key: str = "1"
+        self.openai_api_key: Optional[str] = None
+        self.openai_project_id: Optional[str] = None
+        self.openai_org_id: Optional[str] = None
+        self.openai_base_url: str = "https://api.openai.com/v1"
+        self.openai_model: str = "gpt-5-mini"
 
         self.load()
 
@@ -91,6 +102,17 @@ class Config:
             "AI_NUTRITION_ANALYSIS_KEY",
             "AI_RECIPE_RECOMMEND_URL",
             "AI_RECIPE_RECOMMEND_KEY",
+            "ZHIPU_API_KEY",
+            "ZHIPU_BASE_URL",
+            "ZHIPU_VISION_MODEL",
+            "ZHIPU_TEXT_MODEL",
+            "THEMEALDB_BASE_URL",
+            "THEMEALDB_API_KEY",
+            "OPENAI_API_KEY",
+            "OPENAI_PROJECT_ID",
+            "OPENAI_ORG_ID",
+            "OPENAI_BASE_URL",
+            "OPENAI_MODEL",
         ]
         for key in keys:
             value = os.getenv(key)
@@ -168,6 +190,28 @@ class Config:
             self.ai_recipe_recommend_url = value or None
         elif key == "AI_RECIPE_RECOMMEND_KEY":
             self.ai_recipe_recommend_key = value or None
+        elif key == "ZHIPU_API_KEY":
+            self.zhipu_api_key = value or None
+        elif key == "ZHIPU_BASE_URL":
+            self.zhipu_base_url = value or self.zhipu_base_url
+        elif key == "ZHIPU_VISION_MODEL":
+            self.zhipu_vision_model = value or self.zhipu_vision_model
+        elif key == "ZHIPU_TEXT_MODEL":
+            self.zhipu_text_model = value or self.zhipu_text_model
+        elif key == "THEMEALDB_BASE_URL":
+            self.themealdb_base_url = value or self.themealdb_base_url
+        elif key == "THEMEALDB_API_KEY":
+            self.themealdb_api_key = value or self.themealdb_api_key
+        elif key == "OPENAI_API_KEY":
+            self.openai_api_key = value or None
+        elif key == "OPENAI_PROJECT_ID":
+            self.openai_project_id = value or None
+        elif key == "OPENAI_ORG_ID":
+            self.openai_org_id = value or None
+        elif key == "OPENAI_BASE_URL":
+            self.openai_base_url = value or self.openai_base_url
+        elif key == "OPENAI_MODEL":
+            self.openai_model = value or self.openai_model
 
     @staticmethod
     def _parse_ttl(raw: str, fallback: timedelta) -> timedelta:
