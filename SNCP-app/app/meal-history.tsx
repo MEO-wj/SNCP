@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import {
@@ -12,6 +12,7 @@ import {
   ForkKnife,
   MoonStars,
   SunHorizon,
+  Trash,
 } from 'phosphor-react-native';
 
 import { AmbientBackground } from '@/components/ambient-background';
@@ -20,7 +21,7 @@ import { colors, Palette } from '@/constants/palette';
 import { useAuthToken } from '@/hooks/use-auth-token';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePalette } from '@/hooks/use-palette';
-import { fetchMealsByDate } from '@/services/meals';
+import { deleteMeal, fetchMealsByDate } from '@/services/meals';
 import type { Meal } from '@/types/meal';
 import { formatTimeLabel } from '@/utils/date';
 import { sumMealItemsNutrition } from '@/utils/nutrition';
@@ -137,6 +138,9 @@ export default function MealHistoryScreen() {
   const [meals, setMeals] = useState<Meal[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState('');
+  const [mealPendingDelete, setMealPendingDelete] = useState<Meal | null>(null);
+  const [deleteErrorText, setDeleteErrorText] = useState('');
+  const [deletingMealId, setDeletingMealId] = useState<number | null>(null);
 
   const loadMeals = useCallback(async () => {
     if (!token) {
@@ -170,6 +174,64 @@ export default function MealHistoryScreen() {
   }, [loadMeals]);
 
   const canGoNext = selectedDate < todayKey;
+  const pendingDeleteOption = useMemo(
+    () => (mealPendingDelete ? getMealOption(mealPendingDelete.meal_type) : null),
+    [mealPendingDelete],
+  );
+  const pendingDeleteTotals = useMemo(
+    () => (mealPendingDelete ? sumMealItemsNutrition(mealPendingDelete.items || []) : { calories: 0, protein: 0, fat: 0, carbs: 0 }),
+    [mealPendingDelete],
+  );
+  const PendingDeleteIcon = pendingDeleteOption?.icon;
+
+  const closeDeleteModal = useCallback(() => {
+    if (deletingMealId !== null) {
+      return;
+    }
+    setMealPendingDelete(null);
+    setDeleteErrorText('');
+  }, [deletingMealId]);
+
+  const performDeleteMeal = useCallback(
+    async (meal: Meal) => {
+      if (!token || deletingMealId !== null) {
+        return;
+      }
+
+      setDeleteErrorText('');
+      setDeletingMealId(meal.id);
+      try {
+        await deleteMeal(meal.id, token);
+        setMealPendingDelete(null);
+        await loadMeals();
+      } catch (error) {
+        console.error('[MealHistory] delete failed', error);
+        setDeleteErrorText(error instanceof Error ? error.message : '删除餐次失败，请稍后重试');
+      } finally {
+        setDeletingMealId(null);
+      }
+    },
+    [deletingMealId, loadMeals, token],
+  );
+
+  const handleDeleteMeal = useCallback(
+    (meal: Meal) => {
+      if (!token || loading || deletingMealId !== null) {
+        return;
+      }
+      setDeleteErrorText('');
+      setMealPendingDelete(meal);
+    },
+    [deletingMealId, loading, token],
+  );
+
+  const confirmDeleteMeal = useCallback(async () => {
+    if (!mealPendingDelete || deletingMealId !== null) {
+      return;
+    }
+
+    await performDeleteMeal(mealPendingDelete);
+  }, [deletingMealId, mealPendingDelete, performDeleteMeal]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -258,9 +320,22 @@ export default function MealHistoryScreen() {
                           <Text style={styles.mealCardTime}>{formatTimeLabel(meal.eaten_at)}</Text>
                         </View>
                       </View>
-                      <View style={styles.mealCardCalories}>
-                        <Fire size={14} color={palette.orange500} weight="fill" />
-                        <Text style={styles.mealCardCaloriesText}>{Math.round(totals.calories)} kcal</Text>
+                      <View style={styles.mealCardActions}>
+                        <View style={styles.mealCardCalories}>
+                          <Fire size={14} color={palette.orange500} weight="fill" />
+                          <Text style={styles.mealCardCaloriesText}>{Math.round(totals.calories)} kcal</Text>
+                        </View>
+                        <Pressable
+                          style={[
+                            styles.mealCardDeleteButton,
+                            (loading || deletingMealId !== null) && styles.mealCardDeleteButtonDisabled,
+                          ]}
+                          onPress={() => handleDeleteMeal(meal)}
+                          disabled={loading || deletingMealId !== null}
+                        >
+                          <Trash size={14} color={palette.imperial500} weight="bold" />
+                          <Text style={styles.mealCardDeleteText}>删除</Text>
+                        </Pressable>
                       </View>
                     </View>
 
@@ -295,6 +370,110 @@ export default function MealHistoryScreen() {
         onTrend={() => router.replace('/(tabs)/trend')}
         onProfile={() => router.replace('/(tabs)/settings')}
       />
+      <Modal
+        visible={!!mealPendingDelete}
+        transparent
+        animationType="fade"
+        onRequestClose={closeDeleteModal}
+      >
+        <View style={styles.deleteModalMask}>
+          <View style={styles.deleteModalBackdrop} />
+          <View style={styles.deleteModalCard}>
+            <View style={styles.deleteModalHeader}>
+              <View style={styles.deleteModalIconWrap}>
+                <Trash size={22} color={palette.imperial500} weight="fill" />
+              </View>
+              <View style={styles.deleteModalTextWrap}>
+                <Text style={styles.deleteModalEyebrow}>危险操作</Text>
+                <Text style={styles.deleteModalTitle}>删除餐次</Text>
+                <Text style={styles.deleteModalMessage}>
+                  删除后无法恢复，这条餐次记录里的食物和营养统计会一起移除。
+                </Text>
+              </View>
+            </View>
+
+            {mealPendingDelete && pendingDeleteOption && PendingDeleteIcon ? (
+              <View style={styles.deleteSummaryCard}>
+                <View style={styles.deleteSummaryHeader}>
+                  <View style={styles.deleteSummaryMain}>
+                    <View
+                      style={[
+                        styles.deleteSummaryIconWrap,
+                        {
+                          backgroundColor: isDark
+                            ? pendingDeleteOption.surfaceTintDark
+                            : pendingDeleteOption.surfaceTintLight,
+                        },
+                      ]}
+                    >
+                      <PendingDeleteIcon size={18} color={pendingDeleteOption.tint} weight="fill" />
+                    </View>
+                    <View style={styles.deleteSummaryTextWrap}>
+                      <Text style={styles.deleteSummaryTitle}>{pendingDeleteOption.label}</Text>
+                      <Text style={styles.deleteSummarySubtitle}>
+                        {formatTimeLabel(mealPendingDelete.eaten_at)}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.deleteSummaryCalories}>
+                    <Fire size={14} color={palette.orange500} weight="fill" />
+                    <Text style={styles.deleteSummaryCaloriesText}>
+                      {Math.round(pendingDeleteTotals.calories)} kcal
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.deleteSummaryMetaRow}>
+                  <View style={styles.deleteSummaryMetaPill}>
+                    <Text style={styles.deleteSummaryMetaPillText}>
+                      {mealPendingDelete.items.length} 项食物
+                    </Text>
+                  </View>
+                  <View style={styles.deleteSummaryMetaPill}>
+                    <Text style={styles.deleteSummaryMetaPillText}>
+                      蛋白 {Math.round(pendingDeleteTotals.protein * 10) / 10}g
+                    </Text>
+                  </View>
+                  <View style={styles.deleteSummaryMetaPill}>
+                    <Text style={styles.deleteSummaryMetaPillText}>
+                      碳水 {Math.round(pendingDeleteTotals.carbs * 10) / 10}g
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ) : null}
+
+            {deleteErrorText ? <Text style={styles.deleteModalErrorText}>{deleteErrorText}</Text> : null}
+
+            <View style={styles.deleteModalActionRow}>
+              <Pressable
+                style={[
+                  styles.deleteModalSecondaryButton,
+                  deletingMealId !== null && styles.deleteModalSecondaryButtonDisabled,
+                ]}
+                onPress={closeDeleteModal}
+                disabled={deletingMealId !== null}
+              >
+                <Text style={styles.deleteModalSecondaryButtonText}>取消</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.deleteModalDangerButton,
+                  deletingMealId !== null && styles.deleteModalDangerButtonDisabled,
+                ]}
+                onPress={() => {
+                  void confirmDeleteMeal();
+                }}
+                disabled={deletingMealId !== null}
+              >
+                <Text style={styles.deleteModalDangerButtonText}>
+                  {deletingMealId !== null ? '删除中...' : '确认删除'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -305,6 +484,10 @@ function createStyles(palette: Palette, isDark: boolean) {
   const badgeSurface = isDark ? 'rgba(255,255,255,0.06)' : palette.gold50;
   const badgeBorder = isDark ? 'rgba(255,255,255,0.08)' : palette.gold100;
   const chipSurface = isDark ? palette.stone200 : palette.surfaceWarm;
+  const panelSurfaceAlt = isDark ? palette.stone200 : palette.gold50;
+  const destructiveSurface = isDark ? 'rgba(239, 71, 111, 0.16)' : palette.imperial50;
+  const destructiveBorder = isDark ? 'rgba(239, 71, 111, 0.24)' : palette.imperial100;
+  const modalMask = isDark ? 'rgba(7, 6, 6, 0.56)' : 'rgba(30, 27, 24, 0.28)';
 
   return StyleSheet.create({
     safeArea: {
@@ -491,6 +674,10 @@ function createStyles(palette: Palette, isDark: boolean) {
       alignItems: 'center',
       gap: 12,
     },
+    mealCardActions: {
+      alignItems: 'flex-end',
+      gap: 8,
+    },
     mealCardMain: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -529,6 +716,23 @@ function createStyles(palette: Palette, isDark: boolean) {
       fontSize: 12,
       fontWeight: '700',
       color: palette.orange500,
+    },
+    mealCardDeleteButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
+      backgroundColor: isDark ? 'rgba(255, 99, 132, 0.12)' : palette.rose100,
+    },
+    mealCardDeleteButtonDisabled: {
+      opacity: 0.5,
+    },
+    mealCardDeleteText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.imperial500,
     },
     mealCardMacros: {
       flexDirection: 'row',
@@ -570,6 +774,179 @@ function createStyles(palette: Palette, isDark: boolean) {
       fontSize: 12,
       fontWeight: '600',
       color: palette.stone700,
+    },
+    deleteModalMask: {
+      flex: 1,
+      justifyContent: 'center',
+      paddingHorizontal: 22,
+      backgroundColor: modalMask,
+    },
+    deleteModalBackdrop: {
+      ...StyleSheet.absoluteFillObject,
+    },
+    deleteModalCard: {
+      borderRadius: 28,
+      padding: 20,
+      gap: 16,
+      backgroundColor: panelSurface,
+      borderWidth: 1,
+      borderColor: panelBorder,
+      shadowColor: '#000',
+      shadowOpacity: isDark ? 0.24 : 0.12,
+      shadowRadius: 20,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 8,
+    },
+    deleteModalHeader: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 14,
+    },
+    deleteModalIconWrap: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: destructiveSurface,
+      borderWidth: 1,
+      borderColor: destructiveBorder,
+    },
+    deleteModalTextWrap: {
+      flex: 1,
+      gap: 4,
+    },
+    deleteModalEyebrow: {
+      fontSize: 12,
+      fontWeight: '800',
+      color: palette.imperial500,
+      letterSpacing: 0.3,
+    },
+    deleteModalTitle: {
+      fontSize: 22,
+      fontWeight: '800',
+      color: palette.stone900,
+    },
+    deleteModalMessage: {
+      fontSize: 14,
+      lineHeight: 22,
+      color: palette.stone600,
+    },
+    deleteSummaryCard: {
+      borderRadius: 20,
+      padding: 14,
+      gap: 12,
+      backgroundColor: panelSurfaceAlt,
+      borderWidth: 1,
+      borderColor: panelBorder,
+    },
+    deleteSummaryHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    deleteSummaryMain: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      flex: 1,
+    },
+    deleteSummaryIconWrap: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    deleteSummaryTextWrap: {
+      flex: 1,
+    },
+    deleteSummaryTitle: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: palette.stone900,
+    },
+    deleteSummarySubtitle: {
+      marginTop: 4,
+      fontSize: 12,
+      color: palette.stone500,
+    },
+    deleteSummaryCalories: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
+      backgroundColor: badgeSurface,
+    },
+    deleteSummaryCaloriesText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.orange500,
+    },
+    deleteSummaryMetaRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    deleteSummaryMetaPill: {
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+      borderRadius: 999,
+      backgroundColor: chipSurface,
+    },
+    deleteSummaryMetaPillText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.stone700,
+    },
+    deleteModalErrorText: {
+      fontSize: 13,
+      lineHeight: 18,
+      color: palette.imperial500,
+    },
+    deleteModalActionRow: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    deleteModalSecondaryButton: {
+      flex: 1,
+      borderRadius: 16,
+      paddingVertical: 14,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: panelBorder,
+      backgroundColor: isDark ? panelSurfaceAlt : palette.white,
+    },
+    deleteModalSecondaryButtonText: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: palette.stone700,
+    },
+    deleteModalSecondaryButtonDisabled: {
+      opacity: 0.5,
+    },
+    deleteModalDangerButton: {
+      flex: 1,
+      borderRadius: 16,
+      paddingVertical: 14,
+      alignItems: 'center',
+      backgroundColor: palette.imperial500,
+      shadowColor: palette.imperial500,
+      shadowOpacity: isDark ? 0.2 : 0.16,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 4,
+    },
+    deleteModalDangerButtonDisabled: {
+      opacity: 0.72,
+    },
+    deleteModalDangerButtonText: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: isDark ? '#1A1714' : palette.white,
     },
   });
 }

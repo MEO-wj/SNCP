@@ -585,6 +585,28 @@ export default function RecordScreen() {
     setDeleteErrorText('');
   }, [deletingMealId]);
 
+  const performDeleteMeal = useCallback(
+    async (meal: Meal) => {
+      if (!token || deletingMealId !== null) {
+        return;
+      }
+
+      setDeleteErrorText('');
+      setDeletingMealId(meal.id);
+      try {
+        await deleteMeal(meal.id, token);
+        setMealPendingDelete(null);
+        await loadMeals();
+      } catch (error) {
+        console.error('[Meals] delete failed', error);
+        setDeleteErrorText(error instanceof Error ? error.message : '删除餐次失败，请稍后重试');
+      } finally {
+        setDeletingMealId(null);
+      }
+    },
+    [deletingMealId, loadMeals, token],
+  );
+
   const handleDeleteMeal = useCallback(
     (meal: Meal) => {
       if (!token || saving || deletingMealId !== null) {
@@ -593,26 +615,16 @@ export default function RecordScreen() {
       setDeleteErrorText('');
       setMealPendingDelete(meal);
     },
-    [deletingMealId, saving, token],
+    [deletingMealId, performDeleteMeal, saving, token],
   );
 
   const confirmDeleteMeal = useCallback(async () => {
-    if (!token || !mealPendingDelete || deletingMealId !== null) {
+    if (!mealPendingDelete || deletingMealId !== null) {
       return;
     }
-    setDeleteErrorText('');
-    setDeletingMealId(mealPendingDelete.id);
-    try {
-      await deleteMeal(mealPendingDelete.id, token);
-      setMealPendingDelete(null);
-      await loadMeals();
-    } catch (error) {
-      console.error('[Meals] delete failed', error);
-      setDeleteErrorText(error instanceof Error ? error.message : '删除餐次失败，请稍后重试');
-    } finally {
-      setDeletingMealId(null);
-    }
-  }, [deletingMealId, loadMeals, mealPendingDelete, token]);
+
+    await performDeleteMeal(mealPendingDelete);
+  }, [deletingMealId, mealPendingDelete, performDeleteMeal]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -1076,8 +1088,9 @@ export default function RecordScreen() {
         animationType="fade"
         onRequestClose={closeDeleteModal}
       >
-        <Pressable style={styles.deleteModalMask} onPress={closeDeleteModal}>
-          <Pressable style={styles.deleteModalCard} onPress={() => {}}>
+        <View style={styles.deleteModalMask}>
+          <View style={styles.deleteModalBackdrop} />
+          <View style={styles.deleteModalCard}>
             <View style={styles.deleteModalHeader}>
               <View style={styles.deleteModalIconWrap}>
                 <Trash size={22} color={palette.imperial500} weight="fill" />
@@ -1170,8 +1183,8 @@ export default function RecordScreen() {
                 </Text>
               </Pressable>
             </View>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -1972,6 +1985,9 @@ function createStyles(palette: Palette, isDark: boolean) {
       justifyContent: 'center',
       paddingHorizontal: 22,
       backgroundColor: modalMask,
+    },
+    deleteModalBackdrop: {
+      ...StyleSheet.absoluteFillObject,
     },
     deleteModalCard: {
       borderRadius: 28,

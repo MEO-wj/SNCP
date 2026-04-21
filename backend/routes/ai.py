@@ -118,12 +118,16 @@ def recommend_recipes():
     goals = profile_repo.get_goals(user_id) if user_id else None
     rules = rule_repo.list_rules()
     local_recipes = recipe_repo.list_recipes(user_id=user_id, keyword=data.get("keyword"), tag=data.get("tag"))
-    external_recipes = external_recipe_service.list_candidates(
-        keyword=data.get("keyword"),
-        limit=8,
-        exclude_names=data.get("exclude_names") if isinstance(data.get("exclude_names"), list) else None,
-        refresh_round=_parse_non_negative_int(data.get("refresh_round")),
-    )
+    try:
+        external_recipes = external_recipe_service.list_candidates(
+            keyword=data.get("keyword"),
+            limit=8,
+            exclude_names=data.get("exclude_names") if isinstance(data.get("exclude_names"), list) else None,
+            refresh_round=_parse_non_negative_int(data.get("refresh_round")),
+        )
+    except Exception:  # pragma: no cover
+        logger.exception("external recipe fetch failed")
+        external_recipes = []
     result = ai_service.recommend_recipes(
         {
             "profile": profile or {},
