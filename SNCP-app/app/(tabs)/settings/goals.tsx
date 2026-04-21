@@ -4,10 +4,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import { AmbientBackground } from '@/components/ambient-background';
+import {
+  DEFAULT_NUTRITION_GOALS,
+  getDefaultNutritionGoalsSummary,
+  hasConfiguredNutritionGoals,
+} from '@/constants/nutrition-goals';
 import { Palette } from '@/constants/palette';
 import { useAuthToken } from '@/hooks/use-auth-token';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePalette } from '@/hooks/use-palette';
+import { primeNutritionExperience } from '@/services/nutrition-prime';
+import { notifyNutritionRefresh } from '@/services/nutrition-refresh';
 import { fetchGoals, updateGoals } from '@/services/profile';
 import type { NutritionGoals } from '@/types/profile';
 
@@ -25,6 +32,7 @@ export default function GoalsDetailScreen() {
     if (!token) {
       return;
     }
+
     fetchGoals(token)
       .then((res) => setGoals(res.goals || {}))
       .catch(() => {});
@@ -34,10 +42,13 @@ export default function GoalsDetailScreen() {
     if (!token) {
       return;
     }
+
     setSaving(true);
     try {
       const res = await updateGoals(goals, token);
       setGoals(res.goals || {});
+      notifyNutritionRefresh('goals');
+      void primeNutritionExperience(token);
       router.back();
     } catch (error) {
       console.error('[Goals] save failed', error);
@@ -45,6 +56,8 @@ export default function GoalsDetailScreen() {
       setSaving(false);
     }
   };
+
+  const showDefaultReminder = !hasConfiguredNutritionGoals(goals);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -54,6 +67,13 @@ export default function GoalsDetailScreen() {
           <Text style={styles.backText}>返回</Text>
         </Pressable>
         <Text style={styles.title}>营养目标</Text>
+
+        <View style={[styles.tipCard, showDefaultReminder && styles.tipCardActive]}>
+          <Text style={styles.tipTitle}>普通成年人参考值</Text>
+          <Text style={styles.tipText}>
+            未填写时，可先参考每日 {getDefaultNutritionGoalsSummary()}。后续可以按体重、运动量和减脂或增肌目标再调整。
+          </Text>
+        </View>
 
         <View style={styles.card}>
           <View style={styles.formRow}>
@@ -65,7 +85,7 @@ export default function GoalsDetailScreen() {
                 setGoals((prev) => ({ ...prev, calories_min: Number(text) || undefined }))
               }
               keyboardType="numeric"
-              placeholder="最低"
+              placeholder={String(DEFAULT_NUTRITION_GOALS.calories_min)}
               placeholderTextColor={palette.stone400}
             />
             <Text style={styles.formDash}>-</Text>
@@ -76,7 +96,7 @@ export default function GoalsDetailScreen() {
                 setGoals((prev) => ({ ...prev, calories_max: Number(text) || undefined }))
               }
               keyboardType="numeric"
-              placeholder="最高"
+              placeholder={String(DEFAULT_NUTRITION_GOALS.calories_max)}
               placeholderTextColor={palette.stone400}
             />
           </View>
@@ -89,7 +109,7 @@ export default function GoalsDetailScreen() {
                 setGoals((prev) => ({ ...prev, protein_min: Number(text) || undefined }))
               }
               keyboardType="numeric"
-              placeholder="最低"
+              placeholder={String(DEFAULT_NUTRITION_GOALS.protein_min)}
               placeholderTextColor={palette.stone400}
             />
             <Text style={styles.formDash}>-</Text>
@@ -100,7 +120,7 @@ export default function GoalsDetailScreen() {
                 setGoals((prev) => ({ ...prev, protein_max: Number(text) || undefined }))
               }
               keyboardType="numeric"
-              placeholder="最高"
+              placeholder={String(DEFAULT_NUTRITION_GOALS.protein_max)}
               placeholderTextColor={palette.stone400}
             />
           </View>
@@ -135,6 +155,28 @@ function createStyles(palette: Palette, isDark: boolean) {
       fontSize: 22,
       fontWeight: '800',
       color: palette.stone900,
+    },
+    tipCard: {
+      backgroundColor: palette.white,
+      borderRadius: 18,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: palette.stone100,
+      gap: 6,
+    },
+    tipCardActive: {
+      backgroundColor: palette.gold50,
+      borderColor: palette.gold200,
+    },
+    tipTitle: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: palette.stone800,
+    },
+    tipText: {
+      fontSize: 13,
+      lineHeight: 20,
+      color: palette.stone600,
     },
     card: {
       backgroundColor: palette.white,

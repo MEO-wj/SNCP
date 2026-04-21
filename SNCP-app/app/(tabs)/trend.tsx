@@ -5,15 +5,12 @@ import { useFocusEffect, useRouter } from 'expo-router';
 
 import { AmbientBackground } from '@/components/ambient-background';
 import { BottomDock } from '@/components/bottom-dock';
+import { CaloriesTrendCard, MacroRatioCard, type CalorieTrendBarPoint } from '@/components/ui/nutrition-insights';
 import { colors, Palette } from '@/constants/palette';
 import { useAuthToken } from '@/hooks/use-auth-token';
 import { usePalette } from '@/hooks/use-palette';
 import { fetchNutritionTrend } from '@/services/dashboard';
-
-type TrendItem = {
-  date: string;
-  totals: Record<string, number>;
-};
+import type { NutritionTrendPoint } from '@/types/dashboard';
 
 export default function TrendScreen() {
   const router = useRouter();
@@ -21,7 +18,7 @@ export default function TrendScreen() {
   const palette = usePalette();
   const styles = useMemo(() => createStyles(palette), [palette]);
 
-  const [trend, setTrend] = useState<TrendItem[]>([]);
+  const [trend, setTrend] = useState<NutritionTrendPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState('');
 
@@ -34,7 +31,7 @@ export default function TrendScreen() {
     setLoading(true);
     try {
       const res = await fetchNutritionTrend(token, 30);
-      setTrend((res.trend || []).slice().reverse());
+      setTrend(sortTrendAscending(res.trend || []));
       setErrorText('');
     } catch (error) {
       console.error('[Trend] failed', error);
@@ -50,6 +47,41 @@ export default function TrendScreen() {
     }, [loadTrend]),
   );
 
+  const overviewRatio = useMemo(() => {
+    const totals = trend.reduce(
+      (sum, item) => {
+        sum.protein += item.totals.protein || 0;
+        sum.fat += item.totals.fat || 0;
+        sum.carbs += item.totals.carbs || 0;
+        return sum;
+      },
+      { protein: 0, fat: 0, carbs: 0 },
+    );
+    const totalMacroCalories = totals.protein * 4 + totals.fat * 9 + totals.carbs * 4;
+
+    if (totalMacroCalories <= 0) {
+      return { protein: 0, fat: 0, carbs: 0 };
+    }
+
+    return {
+      protein: (totals.protein * 4) / totalMacroCalories,
+      fat: (totals.fat * 9) / totalMacroCalories,
+      carbs: (totals.carbs * 4) / totalMacroCalories,
+    };
+  }, [trend]);
+
+  const recentTrendPoints = useMemo<CalorieTrendBarPoint[]>(
+    () =>
+      trend.slice(-7).map((item) => ({
+        key: item.date,
+        label: formatTrendLabel(item.date),
+        value: Math.round(item.totals.calories || 0),
+      })),
+    [trend],
+  );
+
+  const historyRows = useMemo(() => [...trend].slice().reverse(), [trend]);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <AmbientBackground variant="home" />
@@ -58,13 +90,26 @@ export default function TrendScreen() {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadTrend} />}
       >
         <Text style={styles.title}>长期趋势</Text>
+        <View style={styles.dualChartRow}>
+          <MacroRatioCard
+            title="区间营养结构"
+            subtitle="近 30 天脂肪、蛋白、碳水供能占比"
+            ratio={overviewRatio}
+          />
+          <CaloriesTrendCard
+            title="热量预览"
+            subtitle="近 7 天摄入波动"
+            points={recentTrendPoints}
+            emptyText="最近 7 天还没有记录"
+          />
+        </View>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>近30天热量趋势</Text>
           {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
-          {trend.length === 0 ? (
+          {historyRows.length === 0 ? (
             <Text style={styles.emptyText}>暂无趋势数据。</Text>
           ) : (
-            trend.map((item) => (
+            historyRows.map((item) => (
               <View key={item.date} style={styles.trendRow}>
                 <Text style={styles.trendDate}>{item.date.slice(5)}</Text>
                 <View style={styles.trendBarWrap}>
@@ -88,6 +133,15 @@ export default function TrendScreen() {
   );
 }
 
+function sortTrendAscending(items: NutritionTrendPoint[]) {
+  return [...items].sort((left, right) => left.date.localeCompare(right.date));
+}
+
+function formatTrendLabel(date: string) {
+  const [, month = '--', day = '--'] = date.split('-');
+  return `${month}/${day}`;
+}
+
 function createStyles(palette: Palette) {
   return StyleSheet.create({
     safeArea: {
@@ -104,6 +158,11 @@ function createStyles(palette: Palette) {
       fontSize: 24,
       fontWeight: '800',
       color: palette.stone900,
+    },
+    dualChartRow: {
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      gap: 12,
     },
     card: {
       backgroundColor: palette.white,

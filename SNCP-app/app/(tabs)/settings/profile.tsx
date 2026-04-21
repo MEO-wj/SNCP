@@ -8,6 +8,8 @@ import { GBD_CHRONIC_DISEASE_TREE, type GbdChronicDiseaseNode } from '@/constant
 import { Palette } from '@/constants/palette';
 import { useAuthToken } from '@/hooks/use-auth-token';
 import { usePalette } from '@/hooks/use-palette';
+import { primeNutritionExperience } from '@/services/nutrition-prime';
+import { notifyNutritionRefresh } from '@/services/nutrition-refresh';
 import { fetchProfile, updateProfile } from '@/services/profile';
 import type { HealthProfile } from '@/types/profile';
 
@@ -211,6 +213,8 @@ export default function ProfileDetailScreen() {
     try {
       const res = await updateProfile(profile, token);
       setProfile(res.profile || {});
+      notifyNutritionRefresh('profile');
+      void primeNutritionExperience(token);
       router.back();
     } catch (error) {
       console.error('[Profile] save failed', error);

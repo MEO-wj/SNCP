@@ -52,6 +52,8 @@ import { useAuthToken } from '@/hooks/use-auth-token';
 import { usePalette } from '@/hooks/use-palette';
 import { analyzeNutrition, recognizeFoods } from '@/services/ai';
 import { createMeal } from '@/services/meals';
+import { primeNutritionExperience } from '@/services/nutrition-prime';
+import { notifyNutritionRefresh } from '@/services/nutrition-refresh';
 import type { AiNutritionResult, AiRecognitionResult, AiRecognizedItem } from '@/types/ai';
 import { formatNutritionValue, scaleNutrition, sumNutritionValues } from '@/utils/nutrition';
 
@@ -461,6 +463,8 @@ export default function AIRecognizeScreen() {
         },
         token,
       );
+      notifyNutritionRefresh('meals');
+      void primeNutritionExperience(token);
       router.replace('/(tabs)/record');
     } catch (error) {
       console.error('[AI] save meal failed', error);

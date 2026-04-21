@@ -95,6 +95,8 @@ except Exception as e:
     redis_client = None
     # 注意：Redis连接失败不影响API基本功能，只是缓存功能不可用
 
+app.extensions["redis_client"] = redis_client
+
 # 配置API限流
 # 使用真实客户端IP作为唯一标识，避免反向代理导致同IP限流
 def _get_client_ip() -> str:

@@ -10,6 +10,11 @@ from flask import Blueprint, jsonify, request
 
 from backend.routes.auth import login_required
 from ai_end.services.ai_service import AIService
+from backend.services.cache_service import (
+    get_recipe_recommend_cache,
+    get_user_state_version,
+    set_recipe_recommend_cache,
+)
 from backend.services.nutrition_service import (
     build_goal_checks,
     build_health_warnings,
@@ -114,6 +119,11 @@ def analyze_nutrition():
 def recommend_recipes():
     data = request.get_json(silent=True) or {}
     user_id = get_request_user_id(request)
+    state_version = get_user_state_version(user_id) if user_id else 0
+    cached_result = get_recipe_recommend_cache(user_id, state_version, data) if user_id else None
+    if cached_result is not None:
+        return jsonify(cached_result), 200
+
     profile = profile_repo.get_profile(user_id) if user_id else None
     goals = profile_repo.get_goals(user_id) if user_id else None
     rules = rule_repo.list_rules()
@@ -137,4 +147,6 @@ def recommend_recipes():
             "context": data,
         }
     )
+    if user_id:
+        set_recipe_recommend_cache(user_id, state_version, data, result)
     return jsonify(result), 200

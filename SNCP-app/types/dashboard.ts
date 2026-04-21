@@ -23,4 +23,29 @@ export type DashboardData = {
   warnings: string[];
   suggestions: string[];
   score: number;
+  score_breakdown?: {
+    rule_score: number;
+    ai_score: number;
+    rule_weight: number;
+    ai_weight: number;
+  };
+  ai?: {
+    provider: string;
+    score: number;
+    summary: string;
+    strengths: string[];
+    risks: string[];
+    next_actions: string[];
+  };
+};
+
+export type NutritionTrendPoint = {
+  date: string;
+  totals: NutritionTotals;
+};
+
+export type NutritionTrendResponse = {
+  start: string;
+  end: string;
+  trend: NutritionTrendPoint[];
 };

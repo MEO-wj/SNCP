@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, request
 
 from backend.repository.meal_repository import MealRepository
 from backend.routes.auth import login_required
+from backend.services.cache_service import bump_user_state_version
 from backend.utils.request_context import get_request_user_id
 
 bp = Blueprint("meals", __name__)
@@ -74,6 +75,7 @@ def create_meal():
         note=data.get("note"),
         items=normalized_items,
     )
+    bump_user_state_version(user_id)
     return jsonify({"meal_id": meal_id, "created": created}), 201 if created else 200
 
 
@@ -99,6 +101,7 @@ def delete_meal(meal_id: int):
     deleted = meal_repo.delete_meal(user_id, meal_id)
     if not deleted:
         return jsonify({"error": "餐次不存在"}), 404
+    bump_user_state_version(user_id)
     return ("", 204)
 
 

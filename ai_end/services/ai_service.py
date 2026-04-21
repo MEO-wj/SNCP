@@ -260,7 +260,9 @@ class AIService:
                 "role": "system",
                 "content": (
                     "你是中文营养分析助手。请基于用户当餐或当天数据，输出简洁、可执行、"
-                    "适合中老年与慢病人群的建议。不要诊断疾病。请严格返回 JSON 对象，不要输出解释。"
+                    "适合中老年与慢病人群的建议。不要诊断疾病。"
+                    "请同时给出 0-100 的营养评分，综合考虑总量目标、蛋白/脂肪/碳水供能结构、"
+                    "是否存在脂肪占比偏高或蛋白不足等问题。请严格返回 JSON 对象，不要输出解释。"
                 ),
             },
             {
@@ -268,17 +270,18 @@ class AIService:
                 "content": (
                     "请根据下面 JSON 给出营养总结。\n"
                     "返回格式必须是 JSON 对象，结构如下："
-                    '{"summary":"","strengths":[""],"risks":[""],"next_actions":[""]}\n'
+                    '{"score":0,"summary":"","strengths":[""],"risks":[""],"next_actions":[""]}\n'
                     f"{json.dumps(self._prepare_for_json(payload), ensure_ascii=False)}"
                 ),
             },
         ]
-        return self._zhipu_chat_completion(
+        result = self._zhipu_chat_completion(
             messages,
             model=self.config.zhipu_text_model,
             max_tokens=900,
             response_format_type="json_object",
         )
+        return self._normalize_analysis_result(result, payload)
 
     def _analyze_with_openai(self, payload: dict[str, Any]) -> dict[str, Any]:
         messages = [
@@ -287,6 +290,8 @@ class AIService:
                 "content": (
                     "你是中文营养分析助手。请基于用户当餐或当天数据，输出简洁、可执行、"
                     "适合中老年与慢病人群的建议。不要诊断疾病。"
+                    "请同时给出 0-100 的营养评分，综合考虑总量目标、蛋白/脂肪/碳水供能结构、"
+                    "是否存在脂肪占比偏高或蛋白不足等问题。"
                 ),
             },
             {
@@ -303,28 +308,37 @@ class AIService:
             "schema": {
                 "type": "object",
                 "properties": {
+                    "score": {"type": "number"},
                     "summary": {"type": "string"},
                     "strengths": {"type": "array", "items": {"type": "string"}},
                     "risks": {"type": "array", "items": {"type": "string"}},
                     "next_actions": {"type": "array", "items": {"type": "string"}},
                 },
-                "required": ["summary", "strengths", "risks", "next_actions"],
+                "required": ["score", "summary", "strengths", "risks", "next_actions"],
                 "additionalProperties": False,
             },
         }
-        return self._chat_completion(messages, schema=schema, max_tokens=900)
+        result = self._chat_completion(messages, schema=schema, max_tokens=900)
+        return self._normalize_analysis_result(result, payload)
 
     def _build_local_analysis(self, payload: dict[str, Any]) -> dict[str, Any]:
         totals = payload.get("totals") or {}
         goal_checks = payload.get("goal_checks") or []
         warnings = payload.get("warnings") or []
         suggestions = payload.get("suggestions") or []
+        macro_ratio = payload.get("macro_ratio") or {}
+        protein_ratio = float(macro_ratio.get("protein") or 0.0)
+        fat_ratio = float(macro_ratio.get("fat") or 0.0)
+        carbs_ratio = float(macro_ratio.get("carbs") or 0.0)
+        rule_score = self._coerce_score(payload.get("rule_score"), default=80)
 
         highlights: list[str] = []
         if (totals.get("protein") or 0) >= 25:
             highlights.append("蛋白摄入相对充足。")
         if (totals.get("fiber") or 0) >= 8:
             highlights.append("膳食纤维表现较好。")
+        if 0.2 <= fat_ratio <= 0.35:
+            highlights.append("脂肪供能占比处于相对合理区间。")
         if not highlights:
             highlights.append("这餐的营养结构比较基础，建议结合全天目标一起看。")
 
@@ -334,9 +348,19 @@ class AIService:
                 risks.append(f"{check.get('name')}偏高，后续餐次可适当回调。")
             elif check.get("status") == "low":
                 risks.append(f"{check.get('name')}偏低，下一餐可有意识补足。")
+        if fat_ratio > 0.35:
+            risks.append("脂肪供能占比偏高，全天结构容易偏油。")
+        if protein_ratio < 0.15:
+            risks.append("蛋白供能占比偏低，饱腹感和恢复支持可能不足。")
+        if carbs_ratio < 0.35:
+            risks.append("碳水供能占比偏低，容易影响全天能量分配。")
         risks.extend(warnings[:3])
 
         next_actions = suggestions[:3]
+        if fat_ratio > 0.35:
+            next_actions.insert(0, "下一餐优先换成瘦肉、豆制品或清淡做法，主动压低脂肪占比。")
+        if protein_ratio < 0.15:
+            next_actions.insert(0, "适当增加鱼虾、鸡胸肉、鸡蛋或豆制品，提高蛋白占比。")
         if not next_actions:
             next_actions = [
                 "优先保证优质蛋白和蔬菜的搭配。",
@@ -344,12 +368,61 @@ class AIService:
                 "把总热量分散到三餐和必要加餐中。",
             ]
 
+        score = rule_score
+        if fat_ratio > 0.4:
+            score -= 18
+        elif fat_ratio > 0.35:
+            score -= 10
+        if protein_ratio < 0.12:
+            score -= 10
+        elif protein_ratio < 0.15:
+            score -= 6
+        if carbs_ratio < 0.3:
+            score -= 8
+        elif carbs_ratio < 0.35:
+            score -= 4
+
         return {
+            "score": max(0, min(int(round(score)), 100)),
             "summary": " ".join(highlights[:2]),
             "strengths": highlights[:3],
             "risks": risks[:3],
             "next_actions": next_actions[:3],
         }
+
+    def _normalize_analysis_result(self, data: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {
+            "score": self._coerce_score(data.get("score"), default=self._coerce_score(payload.get("rule_score"), default=80)),
+            "summary": str(data.get("summary") or "").strip(),
+            "strengths": self._coerce_string_list(data.get("strengths")),
+            "risks": self._coerce_string_list(data.get("risks")),
+            "next_actions": self._coerce_string_list(data.get("next_actions")),
+        }
+
+        if not normalized["summary"]:
+            normalized["summary"] = "已结合营养目标和摄入结构生成建议。"
+        if not normalized["strengths"]:
+            normalized["strengths"] = ["已结合当天摄入情况生成综合判断。"]
+        if not normalized["next_actions"]:
+            normalized["next_actions"] = ["下一餐继续关注优质蛋白、蔬菜和烹饪用油控制。"]
+        return normalized
+
+    def _coerce_string_list(self, value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        result: list[str] = []
+        for item in value:
+            text = str(item or "").strip()
+            if text:
+                result.append(text)
+        return result[:3]
+
+    def _coerce_score(self, value: Any, *, default: int) -> int:
+        try:
+            score = int(round(float(value)))
+        except (TypeError, ValueError):
+            score = default
+        return max(0, min(score, 100))
 
     def _build_recipe_recommendation_messages(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         prepared_payload = self._prepare_for_json(payload)

@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, request
 
 from backend.repository.profile_repository import ProfileRepository
 from backend.routes.auth import login_required
+from backend.services.cache_service import bump_user_state_version
 from backend.utils.request_context import get_request_user_id
 
 bp = Blueprint("profile", __name__)
@@ -30,6 +31,7 @@ def update_profile():
         return jsonify({"error": "用户信息缺失"}), 400
     data = request.get_json(silent=True) or {}
     profile = profile_repo.upsert_profile(user_id, data)
+    bump_user_state_version(user_id)
     return jsonify({"profile": profile}), 200
 
 
@@ -51,5 +53,5 @@ def update_goals():
         return jsonify({"error": "用户信息缺失"}), 400
     data = request.get_json(silent=True) or {}
     goals = profile_repo.upsert_goals(user_id, data)
+    bump_user_state_version(user_id)
     return jsonify({"goals": goals}), 200
-

@@ -39,6 +39,8 @@ import { useAuthToken } from '@/hooks/use-auth-token';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePalette } from '@/hooks/use-palette';
 import { createMeal, deleteMeal, fetchMealsByDate } from '@/services/meals';
+import { primeNutritionExperience } from '@/services/nutrition-prime';
+import { notifyNutritionRefresh } from '@/services/nutrition-refresh';
 import type { Meal, MealItem } from '@/types/meal';
 import type { NutritionValues } from '@/types/nutrition';
 import { formatTimeLabel } from '@/utils/date';
@@ -556,6 +558,8 @@ export default function RecordScreen() {
       setWizardHistory([]);
       setWizardStep('meal');
       await loadMeals();
+      notifyNutritionRefresh('meals');
+      void primeNutritionExperience(token);
     } catch (error) {
       console.error('[Meals] create failed', error);
       const latestMeals = await loadMeals();
@@ -597,6 +601,8 @@ export default function RecordScreen() {
         await deleteMeal(meal.id, token);
         setMealPendingDelete(null);
         await loadMeals();
+        notifyNutritionRefresh('meals');
+        void primeNutritionExperience(token);
       } catch (error) {
         console.error('[Meals] delete failed', error);
         setDeleteErrorText(error instanceof Error ? error.message : '删除餐次失败，请稍后重试');

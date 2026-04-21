@@ -1,5 +1,5 @@
 import { buildAuthHeaders, getApiBaseUrl } from '@/services/api';
-import type { DashboardData } from '@/types/dashboard';
+import type { DashboardData, NutritionTrendResponse } from '@/types/dashboard';
 
 export async function fetchTodayDashboard(token: string): Promise<DashboardData> {
   const resp = await fetch(`${getApiBaseUrl()}/dashboard/today`, {
@@ -14,7 +14,7 @@ export async function fetchTodayDashboard(token: string): Promise<DashboardData>
   return (await resp.json()) as DashboardData;
 }
 
-export async function fetchNutritionTrend(token: string, days = 30) {
+export async function fetchNutritionTrend(token: string, days = 30): Promise<NutritionTrendResponse> {
   const resp = await fetch(`${getApiBaseUrl()}/dashboard/trend?days=${days}`, {
     headers: {
       'Content-Type': 'application/json',
@@ -24,9 +24,5 @@ export async function fetchNutritionTrend(token: string, days = 30) {
   if (!resp.ok) {
     throw new Error('获取趋势失败');
   }
-  return (await resp.json()) as {
-    start: string;
-    end: string;
-    trend: Array<{ date: string; totals: Record<string, number> }>;
-  };
+  return (await resp.json()) as NutritionTrendResponse;
 }

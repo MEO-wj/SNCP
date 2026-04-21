@@ -22,6 +22,8 @@ import { useAuthToken } from '@/hooks/use-auth-token';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePalette } from '@/hooks/use-palette';
 import { deleteMeal, fetchMealsByDate } from '@/services/meals';
+import { primeNutritionExperience } from '@/services/nutrition-prime';
+import { notifyNutritionRefresh } from '@/services/nutrition-refresh';
 import type { Meal } from '@/types/meal';
 import { formatTimeLabel } from '@/utils/date';
 import { sumMealItemsNutrition } from '@/utils/nutrition';
@@ -204,6 +206,8 @@ export default function MealHistoryScreen() {
         await deleteMeal(meal.id, token);
         setMealPendingDelete(null);
         await loadMeals();
+        notifyNutritionRefresh('meals');
+        void primeNutritionExperience(token);
       } catch (error) {
         console.error('[MealHistory] delete failed', error);
         setDeleteErrorText(error instanceof Error ? error.message : '删除餐次失败，请稍后重试');

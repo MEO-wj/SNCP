@@ -6,6 +6,11 @@ import { PencilSimpleLine, Phone } from 'phosphor-react-native';
 
 import { AmbientBackground } from '@/components/ambient-background';
 import { BottomDock } from '@/components/bottom-dock';
+import {
+  formatNutritionGoalRange,
+  getDefaultNutritionGoalsSummary,
+  hasConfiguredNutritionGoals,
+} from '@/constants/nutrition-goals';
 import { colors, Palette } from '@/constants/palette';
 import { setAuthToken, useAuthToken } from '@/hooks/use-auth-token';
 import { usePalette } from '@/hooks/use-palette';
@@ -98,24 +103,16 @@ export default function SettingsScreen() {
   }, [profile]);
 
   const goalsSummary = useMemo(() => {
-    const formatRange = (min?: number | null, max?: number | null, unit?: string) => {
-      const hasMin = min !== null && min !== undefined;
-      const hasMax = max !== null && max !== undefined;
-      if (!hasMin && !hasMax) {
-        return '';
-      }
-      const low = hasMin ? String(min) : '--';
-      const high = hasMax ? String(max) : '--';
-      return `${low}-${high}${unit || ''}`;
-    };
-    const calories = formatRange(goals.calories_min, goals.calories_max, 'kcal');
-    const protein = formatRange(goals.protein_min, goals.protein_max, 'g');
+    const calories = formatNutritionGoalRange(goals.calories_min, goals.calories_max, 'kcal');
+    const protein = formatNutritionGoalRange(goals.protein_min, goals.protein_max, 'g');
     const values = [
       calories ? `热量 ${calories}` : '',
       protein ? `蛋白 ${protein}` : '',
     ].filter(Boolean);
-    return values.length > 0 ? values.join(' · ') : '未设置，点击填写';
+    return values.length > 0 ? values.join(' · ') : `默认建议：${getDefaultNutritionGoalsSummary()}`;
   }, [goals]);
+
+  const hasCustomGoals = useMemo(() => hasConfiguredNutritionGoals(goals), [goals]);
 
   const displayName = activeUserProfile?.display_name || '未设置昵称';
   const displayPhone = activeUserProfile?.phone || '--';
@@ -220,7 +217,9 @@ export default function SettingsScreen() {
           <Text style={styles.entrySummary} numberOfLines={2}>
             {goalsSummary}
           </Text>
-          <Text style={styles.entryHint}>点击进入填写</Text>
+          <Text style={styles.entryHint}>
+            {hasCustomGoals ? '点击进入填写' : '未设置时会显示默认建议'}
+          </Text>
         </Pressable>
 
         <View style={[styles.card, styles.themeCard]}>

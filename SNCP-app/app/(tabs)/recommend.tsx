@@ -23,6 +23,7 @@ import {
   type RecipePost,
 } from '@/services/recipe-posts';
 import { createRecipe, fetchRecipes } from '@/services/recipes';
+import { subscribeNutritionRefresh } from '@/services/nutrition-refresh';
 
 type LoadOptions = {
   excludeNames?: string[];
@@ -79,13 +80,15 @@ export default function RecommendScreen() {
   );
 
   const load = useCallback(
-    async (nextKeyword = '', options?: LoadOptions) => {
+    async (nextKeyword = '', options?: LoadOptions & { silent?: boolean }) => {
       if (!token) {
         return;
       }
 
-      setLoading(true);
-      setErrorText('');
+      if (!options?.silent) {
+        setLoading(true);
+        setErrorText('');
+      }
 
       try {
         const [libraryResult, aiResult] = await Promise.allSettled([
@@ -136,9 +139,13 @@ export default function RecommendScreen() {
         setUsingDemoData(nextUsingDemoData);
         setProvider(nextProvider);
         setMessage(nextMessage);
-        setErrorText(nextErrorText);
+        if (!options?.silent || nextErrorText) {
+          setErrorText(nextErrorText);
+        }
       } finally {
-        setLoading(false);
+        if (!options?.silent) {
+          setLoading(false);
+        }
       }
     },
     [token],
@@ -150,6 +157,12 @@ export default function RecommendScreen() {
     }
     void load('', { refreshRound: 0 });
   }, [load, token]);
+
+  useEffect(() => {
+    return subscribeNutritionRefresh(() => {
+      void load(keyword, { refreshRound, silent: true });
+    });
+  }, [keyword, load, refreshRound]);
 
   const handleSearch = useCallback(() => {
     setRefreshRound(0);

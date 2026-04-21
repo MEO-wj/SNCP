@@ -123,6 +123,16 @@ def build_suggestions(goal_checks: list[dict[str, Any]]) -> list[str]:
     return suggestions
 
 
+def compute_rule_score(goal_checks: list[dict[str, Any]]) -> int:
+    score = 100
+    for check in goal_checks:
+        if check.get("status") == "high":
+            score -= 10
+        elif check.get("status") == "low":
+            score -= 6
+    return max(0, min(score, 100))
+
+
 __all__ = [
     "sum_nutrition",
     "build_macro_ratio",
@@ -130,4 +140,5 @@ __all__ = [
     "build_goal_checks",
     "build_health_warnings",
     "build_suggestions",
+    "compute_rule_score",
 ]
