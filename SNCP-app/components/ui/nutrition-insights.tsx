@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import React, { useEffect, useId, useMemo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import Svg, { Circle, Defs, Line, LinearGradient as SvgLinearGradient, Rect, Stop } from 'react-native-svg';
 
 import type { Palette } from '@/constants/palette';
@@ -39,9 +39,79 @@ type Segment = {
   color: string;
 };
 
+type ActiveMacroInfo = {
+  key: string;
+  label: string;
+  percent: number;
+  color: string;
+};
+
+type ActiveCalorieInfo = {
+  key: string;
+  label: string;
+  value: number;
+  leftPercent: number;
+  placement: 'left' | 'center' | 'right';
+};
+
+const insightOverlayListeners = new Set<(ownerId: string | null) => void>();
+
+function setActiveInsightOwner(ownerId: string | null) {
+  insightOverlayListeners.forEach((listener) => listener(ownerId));
+}
+
+function subscribeInsightOverlay(listener: (ownerId: string | null) => void) {
+  insightOverlayListeners.add(listener);
+  return () => {
+    insightOverlayListeners.delete(listener);
+  };
+}
+
+function resolveMacroSegmentFromTouch(
+  locationX: number,
+  locationY: number,
+  segments: Segment[],
+  total: number,
+) {
+  if (total <= 0) {
+    return null;
+  }
+
+  const center = 48;
+  const dx = locationX - center;
+  const dy = locationY - center;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  const innerRadius = 16;
+  const outerRadius = 44;
+
+  if (distance < innerRadius || distance > outerRadius) {
+    return null;
+  }
+
+  const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+  const normalizedAngle = (angle + 450) % 360;
+  let accumulatedAngle = 0;
+
+  for (const segment of segments) {
+    if (segment.value <= 0) {
+      continue;
+    }
+
+    const segmentAngle = (segment.value / total) * 360;
+    if (normalizedAngle >= accumulatedAngle && normalizedAngle < accumulatedAngle + segmentAngle) {
+      return segment.key;
+    }
+    accumulatedAngle += segmentAngle;
+  }
+
+  return segments.find((segment) => segment.value > 0)?.key ?? null;
+}
+
 export function MacroRatioCard({ title, subtitle, ratio, style }: MacroRatioCardProps) {
+  const ownerId = useId();
   const palette = usePalette();
   const styles = useMemo(() => createStyles(palette), [palette]);
+  const [activeSegmentKey, setActiveSegmentKey] = useState<string | null>(null);
 
   const segments = useMemo<Segment[]>(
     () => [
@@ -52,23 +122,41 @@ export function MacroRatioCard({ title, subtitle, ratio, style }: MacroRatioCard
     [palette.blue500, palette.imperial500, palette.orange500, ratio.carbs, ratio.fat, ratio.protein],
   );
 
-  const total = useMemo(
-    () => segments.reduce((sum, segment) => sum + segment.value, 0),
-    [segments],
-  );
+  const total = useMemo(() => segments.reduce((sum, segment) => sum + segment.value, 0), [segments]);
 
-  const dominant = useMemo(() => {
+  const dominant = useMemo<ActiveMacroInfo>(() => {
     const base = segments.reduce((top, current) => (current.value > top.value ? current : top), segments[0]);
     return {
+      key: base.key,
       label: base.label,
       percent: Math.round((total > 0 ? base.value / total : 0) * 100),
+      color: base.color,
     };
   }, [segments, total]);
 
-  const displaySegments = useMemo(
-    () => [...segments].sort((left, right) => right.value - left.value),
-    [segments],
-  );
+  const activeSegment = useMemo<ActiveMacroInfo>(() => {
+    const current = segments.find((segment) => segment.key === activeSegmentKey) ?? null;
+    if (!current) {
+      return dominant;
+    }
+
+    return {
+      key: current.key,
+      label: current.label,
+      percent: Math.round((total > 0 ? current.value / total : 0) * 100),
+      color: current.color,
+    };
+  }, [activeSegmentKey, dominant, segments, total]);
+
+  const displaySegments = useMemo(() => [...segments].sort((left, right) => right.value - left.value), [segments]);
+
+  useEffect(() => {
+    return subscribeInsightOverlay((nextOwnerId) => {
+      if (nextOwnerId !== ownerId) {
+        setActiveSegmentKey(null);
+      }
+    });
+  }, [ownerId]);
 
   return (
     <View style={[styles.chartCard, style]}>
@@ -77,25 +165,72 @@ export function MacroRatioCard({ title, subtitle, ratio, style }: MacroRatioCard
       <View style={styles.visualPanel}>
         <View style={styles.orbSoft} />
         <View style={[styles.orbSoft, styles.orbWarm]} />
+        {activeSegmentKey ? (
+          <View pointerEvents="none" style={styles.floatingTip}>
+            <View style={[styles.floatingTipDot, { backgroundColor: activeSegment.color }]} />
+            <Text style={styles.floatingTipText}>{`${activeSegment.label} ${activeSegment.percent}%`}</Text>
+          </View>
+        ) : null}
         <View style={styles.macroLayout}>
           <View style={styles.ringWrap}>
-            <MacroDonut palette={palette} segments={segments} total={total} />
+            <MacroDonut
+              palette={palette}
+              segments={segments}
+              total={total}
+              activeSegmentKey={activeSegmentKey}
+              onActivate={(nextKey) => {
+                setActiveInsightOwner(nextKey ? ownerId : null);
+                setActiveSegmentKey(nextKey);
+              }}
+            />
+            <Pressable
+              style={styles.ringTouchLayer}
+              hitSlop={8}
+              onPress={(event) => {
+                const nextKey = resolveMacroSegmentFromTouch(
+                  event.nativeEvent.locationX,
+                  event.nativeEvent.locationY,
+                  segments,
+                  total,
+                );
+
+                if (!nextKey) {
+                  return;
+                }
+
+                const finalKey = activeSegmentKey === nextKey ? null : nextKey;
+                setActiveInsightOwner(finalKey ? ownerId : null);
+                setActiveSegmentKey(finalKey);
+              }}
+            />
             <View pointerEvents="none" style={styles.ringCenter}>
-              <Text style={styles.ringCenterValue}>{dominant.percent}%</Text>
-              <Text style={styles.ringCenterLabel}>{dominant.label}</Text>
+              <Text style={styles.ringCenterValue}>{activeSegment.percent}%</Text>
+              <Text style={styles.ringCenterLabel}>{activeSegment.label}</Text>
             </View>
           </View>
           <View style={styles.legendRow}>
             {displaySegments.map((segment) => {
               const percent = Math.round((total > 0 ? segment.value / total : 0) * 100);
+              const isActive = activeSegment.key === segment.key;
+
               return (
-                <View key={segment.key} style={styles.legendItem}>
+                <Pressable
+                  key={segment.key}
+                  style={[styles.legendItem, isActive && styles.legendItemActive]}
+                  onPress={() => {
+                    setActiveSegmentKey((current) => {
+                      const nextKey = current === segment.key ? null : segment.key;
+                      setActiveInsightOwner(nextKey ? ownerId : null);
+                      return nextKey;
+                    });
+                  }}
+                >
                   <View style={[styles.legendDot, { backgroundColor: segment.color }]} />
                   <View style={styles.legendTextWrap}>
                     <Text style={styles.legendLabel}>{segment.label}</Text>
                     <Text style={styles.legendValue}>{percent}%</Text>
                   </View>
-                </View>
+                </Pressable>
               );
             })}
           </View>
@@ -112,16 +247,55 @@ export function CaloriesTrendCard({
   emptyText = '暂无热量趋势数据',
   style,
 }: CaloriesTrendCardProps) {
+  const ownerId = useId();
   const palette = usePalette();
   const styles = useMemo(() => createStyles(palette), [palette]);
+  const [activePointKey, setActivePointKey] = useState<string | null>(null);
 
+  const fallbackPoint = useMemo(
+    () => [...points].reverse().find((point) => point.value > 0) ?? points[points.length - 1] ?? null,
+    [points],
+  );
   const latest = points[points.length - 1];
+  const activePoint = useMemo<ActiveCalorieInfo | null>(() => {
+    const current = points.find((point) => point.key === activePointKey) ?? fallbackPoint;
+    if (!current) {
+      return null;
+    }
+
+    const left = 10;
+    const right = 10;
+    const viewBoxWidth = 180;
+    const slotWidth = (viewBoxWidth - left - right) / Math.max(points.length, 1);
+    const index = points.findIndex((point) => point.key === current.key);
+    const centerX = left + index * slotWidth + slotWidth / 2;
+
+    const leftPercent = (centerX / viewBoxWidth) * 100;
+
+    return {
+      key: current.key,
+      label: current.label,
+      value: Math.round(current.value ?? 0),
+      leftPercent,
+      placement: leftPercent >= 72 ? 'right' : leftPercent <= 28 ? 'left' : 'center',
+    };
+  }, [activePointKey, fallbackPoint, points]);
   const maxValue = Math.max(...points.map((point) => point.value), 1);
   const averageValue = points.length
     ? Math.round(points.reduce((sum, point) => sum + point.value, 0) / points.length)
     : 0;
   const firstLabel = points[0]?.label ?? '--';
   const lastLabel = latest?.label ?? '--';
+  const metricValue = activePoint?.value ?? Math.round(latest?.value ?? 0);
+  const metricLabel = activePoint ? activePoint.label : 'kcal';
+
+  useEffect(() => {
+    return subscribeInsightOverlay((nextOwnerId) => {
+      if (nextOwnerId !== ownerId) {
+        setActivePointKey(null);
+      }
+    });
+  }, [ownerId]);
 
   return (
     <View style={[styles.chartCard, style]}>
@@ -131,8 +305,8 @@ export function CaloriesTrendCard({
           <Text style={styles.chartSubtitle}>{subtitle}</Text>
         </View>
         <View style={styles.metricPill}>
-          <Text style={styles.metricPillValue}>{Math.round(latest?.value ?? 0)}</Text>
-          <Text style={styles.metricPillLabel}>kcal</Text>
+          <Text style={styles.metricPillValue}>{metricValue}</Text>
+          <Text style={styles.metricPillLabel}>{metricLabel}</Text>
         </View>
       </View>
       <View style={[styles.visualPanel, styles.trendPanel]}>
@@ -143,6 +317,21 @@ export function CaloriesTrendCard({
         ) : (
           <>
             <View style={styles.trendCanvas}>
+              {activePointKey && activePoint ? (
+                <View
+                  pointerEvents="none"
+                  style={[
+                    styles.barTooltip,
+                    activePoint.placement === 'left'
+                      ? styles.barTooltipLeft
+                      : activePoint.placement === 'right'
+                        ? styles.barTooltipRight
+                        : [styles.barTooltipCenter, { left: `${activePoint.leftPercent}%` }],
+                  ]}
+                >
+                  <Text style={styles.barTooltipText}>{`${activePoint.label} · ${activePoint.value} kcal`}</Text>
+                </View>
+              ) : null}
               <Svg width="100%" height="100%" viewBox="0 0 180 118" preserveAspectRatio="none">
                 <Defs>
                   <SvgLinearGradient id="caloriesBarGradient" x1="0" y1="0" x2="0" y2="1">
@@ -159,6 +348,11 @@ export function CaloriesTrendCard({
                   maxValue={maxValue}
                   palette={palette}
                   points={points}
+                  activePointKey={activePointKey}
+                  onActivate={(nextKey) => {
+                    setActiveInsightOwner(nextKey ? ownerId : null);
+                    setActivePointKey(nextKey);
+                  }}
                 />
               </Svg>
             </View>
@@ -178,10 +372,14 @@ function MacroDonut({
   palette,
   segments,
   total,
+  activeSegmentKey,
+  onActivate,
 }: {
   palette: Palette;
   segments: Segment[];
   total: number;
+  activeSegmentKey: string | null;
+  onActivate: (segmentKey: string | null) => void;
 }) {
   const size = 96;
   const strokeWidth = 12;
@@ -191,22 +389,18 @@ function MacroDonut({
 
   return (
     <Svg width={size} height={size} viewBox="0 0 96 96">
-      <Circle
-        cx="48"
-        cy="48"
-        r={radius}
-        stroke={palette.stone100}
-        strokeWidth={strokeWidth}
-        fill="none"
-      />
+      <Circle cx="48" cy="48" r={radius} stroke={palette.stone100} strokeWidth={strokeWidth} fill="none" />
       {segments.map((segment) => {
         if (total <= 0 || segment.value <= 0) {
           return null;
         }
+
         const fraction = segment.value / total;
         const gap = Math.min(0.022, fraction * 0.22);
         const visibleFraction = Math.max(fraction - gap, 0);
         const strokeLength = circumference * visibleFraction;
+        const isActive = activeSegmentKey === segment.key;
+        const shouldDim = Boolean(activeSegmentKey) && !isActive;
         const circle = (
           <Circle
             key={segment.key}
@@ -221,6 +415,8 @@ function MacroDonut({
             strokeDashoffset={-offset * circumference}
             rotation="-90"
             origin="48, 48"
+            opacity={shouldDim ? 0.35 : 1}
+            onPress={() => onActivate(activeSegmentKey === segment.key ? null : segment.key)}
           />
         );
         offset += fraction;
@@ -235,11 +431,15 @@ function TrendBars({
   maxValue,
   palette,
   points,
+  activePointKey,
+  onActivate,
 }: {
   averageValue: number;
   maxValue: number;
   palette: Palette;
   points: CalorieTrendBarPoint[];
+  activePointKey: string | null;
+  onActivate: (pointKey: string | null) => void;
 }) {
   const viewBoxWidth = 180;
   const left = 10;
@@ -275,7 +475,9 @@ function TrendBars({
         const barHeight = point.value > 0 ? Math.max(10, (point.value / maxValue) * chartHeight) : 6;
         const x = left + index * slotWidth + (slotWidth - barWidth) / 2;
         const y = chartBottom - barHeight;
-        const gradient = index === points.length - 1 ? 'url(#caloriesBarGradientActive)' : 'url(#caloriesBarGradient)';
+        const isActive = activePointKey ? point.key === activePointKey : index === points.length - 1;
+        const shouldDim = Boolean(activePointKey) && !isActive;
+        const gradient = isActive ? 'url(#caloriesBarGradientActive)' : 'url(#caloriesBarGradient)';
 
         return (
           <Rect
@@ -286,6 +488,8 @@ function TrendBars({
             height={barHeight}
             rx={barWidth / 2}
             fill={gradient}
+            opacity={shouldDim ? 0.45 : 1}
+            onPress={() => onActivate(activePointKey === point.key ? null : point.key)}
           />
         );
       })}
@@ -304,7 +508,7 @@ function createStyles(palette: Palette) {
       borderWidth: 1,
       borderColor: palette.stone100,
       gap: 6,
-      overflow: 'hidden',
+      overflow: 'visible',
       shadowColor: '#000',
       shadowOpacity: 0.06,
       shadowRadius: 10,
@@ -340,7 +544,7 @@ function createStyles(palette: Palette) {
       backgroundColor: palette.surfaceWarm,
       paddingHorizontal: 8,
       paddingVertical: 8,
-      overflow: 'hidden',
+      overflow: 'visible',
       minHeight: 126,
       justifyContent: 'center',
     },
@@ -349,11 +553,14 @@ function createStyles(palette: Palette) {
       minHeight: 126,
       justifyContent: 'space-between',
       paddingBottom: 8,
+      zIndex: 4,
     },
     trendCanvas: {
       flex: 1,
       minHeight: 92,
       justifyContent: 'flex-end',
+      overflow: 'visible',
+      zIndex: 5,
     },
     orbSoft: {
       position: 'absolute',
@@ -385,6 +592,11 @@ function createStyles(palette: Palette) {
       height: 96,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    ringTouchLayer: {
+      ...StyleSheet.absoluteFillObject,
+      borderRadius: 999,
+      zIndex: 3,
     },
     ringCenter: {
       position: 'absolute',
@@ -422,6 +634,10 @@ function createStyles(palette: Palette) {
       backgroundColor: palette.white,
       borderWidth: 1,
       borderColor: palette.stone100,
+    },
+    legendItemActive: {
+      borderColor: palette.gold200,
+      backgroundColor: palette.gold50,
     },
     legendDot: {
       width: 7,
@@ -481,6 +697,62 @@ function createStyles(palette: Palette) {
       fontSize: 13,
       color: palette.stone500,
       textAlign: 'center',
+    },
+    floatingTip: {
+      position: 'absolute',
+      top: -4,
+      left: 10,
+      right: 10,
+      zIndex: 8,
+      elevation: 8,
+      alignSelf: 'center',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
+      backgroundColor: 'rgba(20, 18, 16, 0.92)',
+    },
+    floatingTipDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 999,
+    },
+    floatingTipText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: palette.orange500,
+    },
+    barTooltip: {
+      position: 'absolute',
+      top: 2,
+      zIndex: 10,
+      elevation: 10,
+      maxWidth: 118,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 12,
+      backgroundColor: 'rgba(20, 18, 16, 0.92)',
+      shadowColor: '#000',
+      shadowOpacity: 0.14,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+    },
+    barTooltipLeft: {
+      left: 8,
+    },
+    barTooltipCenter: {
+      transform: [{ translateX: -42 }],
+    },
+    barTooltipRight: {
+      right: 8,
+    },
+    barTooltipText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: palette.orange500,
     },
   });
 }
