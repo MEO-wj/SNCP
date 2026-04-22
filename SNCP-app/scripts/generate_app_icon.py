@@ -491,22 +491,6 @@ def create_foreground_icon() -> Image.Image:
     return canvas
 
 
-def create_pot_hero_icon() -> Image.Image:
-    canvas = build_background()
-    render_badge(canvas)
-    render_leaf_inside_badge(canvas)
-    render_inner_mark_hero(canvas)
-    return canvas
-
-
-def create_pot_hero_foreground_icon() -> Image.Image:
-    canvas = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
-    render_badge(canvas)
-    render_leaf_inside_badge(canvas)
-    render_inner_mark_hero(canvas)
-    return canvas
-
-
 def create_pot_sticker_icon() -> Image.Image:
     canvas = build_background()
     render_inner_mark_sticker(canvas)
@@ -521,8 +505,8 @@ def create_pot_sticker_foreground_icon() -> Image.Image:
 
 def export_assets(root: Path) -> None:
     assets_dir = root / "assets" / "images"
-    pot_hero_icon = create_pot_hero_icon().convert("RGB")
-    pot_hero_icon.save(assets_dir / "icon-pot-hero.png", format="PNG")
+    app_icon = create_full_icon().convert("RGB")
+    app_icon.save(assets_dir / "icon-pot-hero.png", format="PNG")
 
 
 if __name__ == "__main__":

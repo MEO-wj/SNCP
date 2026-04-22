@@ -54,6 +54,35 @@ def today_dashboard():
     for meal in meals:
         items.extend(meal.get("items") or [])
 
+    if not items:
+        empty_totals = sum_nutrition([])
+        payload = {
+            "date": day.isoformat(),
+            "meal_count": 0,
+            "totals": empty_totals,
+            "macro_ratio": build_macro_ratio(empty_totals),
+            "goal_checks": [],
+            "warnings": ["今日尚未记录餐次，请先记录早餐、午餐或晚餐。"],
+            "suggestions": [],
+            "score": 0,
+            "score_breakdown": {
+                "rule_score": 0,
+                "ai_score": 0,
+                "rule_weight": 0,
+                "ai_weight": 0,
+            },
+            "ai": {
+                "provider": "local",
+                "score": 0,
+                "summary": "",
+                "strengths": [],
+                "risks": [],
+                "next_actions": [],
+            },
+        }
+        set_dashboard_today_cache(user_id, day.isoformat(), state_version, payload)
+        return jsonify(payload), 200
+
     profile = profile_repo.get_profile(user_id) or {}
     goals = profile_repo.get_goals(user_id) or default_goals()
     rules = rule_repo.list_rules()

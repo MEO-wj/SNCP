@@ -23,6 +23,11 @@ import {
   type RecipePost,
 } from '@/services/recipe-posts';
 import { createRecipe, fetchRecipes } from '@/services/recipes';
+import {
+  readRecommendExperienceCache,
+  writeRecommendExperienceCache,
+  type RecommendExperienceCache,
+} from '@/services/nutrition-cache';
 import { subscribeNutritionRefresh } from '@/services/nutrition-refresh';
 
 type LoadOptions = {
@@ -68,6 +73,20 @@ export default function RecommendScreen() {
   const [errorText, setErrorText] = useState('');
   const [savingRecipeId, setSavingRecipeId] = useState<string | null>(null);
   const [refreshRound, setRefreshRound] = useState(0);
+
+  const applyCachedState = useCallback((cached: RecommendExperienceCache | null) => {
+    if (!cached) {
+      return false;
+    }
+
+    cacheRecipePosts([...cached.recipePosts, ...cached.recommendationPosts]);
+    setRecipePosts(cached.recipePosts);
+    setRecommendationPosts(cached.recommendationPosts);
+    setUsingDemoData(cached.usingDemoData);
+    setProvider(cached.provider);
+    setMessage(cached.message);
+    return true;
+  }, []);
 
   const handleOpenRecipe = useCallback(
     (recipe: RecipePost) => {
@@ -139,6 +158,13 @@ export default function RecommendScreen() {
         setUsingDemoData(nextUsingDemoData);
         setProvider(nextProvider);
         setMessage(nextMessage);
+        await writeRecommendExperienceCache(nextKeyword, {
+          recipePosts: basePosts,
+          recommendationPosts: nextRecommendationPosts,
+          usingDemoData: nextUsingDemoData,
+          provider: nextProvider,
+          message: nextMessage,
+        });
         if (!options?.silent || nextErrorText) {
           setErrorText(nextErrorText);
         }
@@ -155,8 +181,26 @@ export default function RecommendScreen() {
     if (!token) {
       return;
     }
-    void load('', { refreshRound: 0 });
-  }, [load, token]);
+
+    let cancelled = false;
+    void (async () => {
+      const cached = await readRecommendExperienceCache('');
+      if (cancelled) {
+        return;
+      }
+
+      if (applyCachedState(cached)) {
+        void load('', { refreshRound: 0, silent: true });
+        return;
+      }
+
+      void load('', { refreshRound: 0 });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyCachedState, load, token]);
 
   useEffect(() => {
     return subscribeNutritionRefresh(() => {
@@ -166,8 +210,11 @@ export default function RecommendScreen() {
 
   const handleSearch = useCallback(() => {
     setRefreshRound(0);
-    void load(keyword, { refreshRound: 0 });
-  }, [keyword, load]);
+    void (async () => {
+      const hasCache = applyCachedState(await readRecommendExperienceCache(keyword));
+      void load(keyword, { refreshRound: 0, silent: hasCache });
+    })();
+  }, [applyCachedState, keyword, load]);
 
   const handleRefreshRecommendations = useCallback(() => {
     const nextRound = refreshRound + 1;

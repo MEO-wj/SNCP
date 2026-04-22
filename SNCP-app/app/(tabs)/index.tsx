@@ -12,6 +12,7 @@ import { colors, Palette } from '@/constants/palette';
 import { useAuthToken } from '@/hooks/use-auth-token';
 import { usePalette } from '@/hooks/use-palette';
 import { fetchNutritionTrend, fetchTodayDashboard } from '@/services/dashboard';
+import { readHomeExperienceCache, writeHomeExperienceCache } from '@/services/nutrition-cache';
 import { subscribeNutritionRefresh } from '@/services/nutrition-refresh';
 import type { DashboardData, NutritionTrendPoint } from '@/types/dashboard';
 import { formatDateLabel } from '@/utils/date';
@@ -26,44 +27,73 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(false);
   const currentDate = useMemo(() => formatDateLabel(), []);
 
-  const loadData = useCallback(async (options?: { silent?: boolean }) => {
-    if (!token) {
-      return;
-    }
-    if (!options?.silent) {
-      setLoading(true);
-    }
-    try {
-      const [dashboardResult, trendResult] = await Promise.allSettled([
-        fetchTodayDashboard(token),
-        fetchNutritionTrend(token, 7),
-      ]);
-
-      if (dashboardResult.status === 'fulfilled') {
-        setData(dashboardResult.value);
-      } else {
-        console.error('[Dashboard] failed:', dashboardResult.reason);
+  const loadData = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!token) {
+        return;
       }
 
-      if (trendResult.status === 'fulfilled') {
-        setTrend(sortTrendAscending(trendResult.value.trend || []));
-      } else {
-        console.error('[Dashboard trend] failed:', trendResult.reason);
-      }
-    } catch (error) {
-      console.error('[Dashboard] failed:', error);
-    } finally {
       if (!options?.silent) {
-        setLoading(false);
+        setLoading(true);
       }
-    }
-  }, [token]);
+
+      try {
+        const [dashboardResult, trendResult] = await Promise.allSettled([
+          fetchTodayDashboard(token),
+          fetchNutritionTrend(token, 7),
+        ]);
+
+        if (dashboardResult.status === 'fulfilled') {
+          setData(dashboardResult.value);
+        } else {
+          console.error('[Dashboard] failed:', dashboardResult.reason);
+        }
+
+        if (trendResult.status === 'fulfilled') {
+          setTrend(sortTrendAscending(trendResult.value.trend || []));
+        } else {
+          console.error('[Dashboard trend] failed:', trendResult.reason);
+        }
+
+        if (dashboardResult.status === 'fulfilled' && trendResult.status === 'fulfilled') {
+          await writeHomeExperienceCache(dashboardResult.value, sortTrendAscending(trendResult.value.trend || []));
+        }
+      } catch (error) {
+        console.error('[Dashboard] failed:', error);
+      } finally {
+        if (!options?.silent) {
+          setLoading(false);
+        }
+      }
+    },
+    [token],
+  );
 
   useEffect(() => {
     if (!token) {
       return;
     }
-    void loadData();
+
+    let cancelled = false;
+    void (async () => {
+      const cached = await readHomeExperienceCache();
+      if (cancelled) {
+        return;
+      }
+
+      if (cached) {
+        setData(cached.dashboard);
+        setTrend(sortTrendAscending(cached.trend || []));
+        void loadData({ silent: true });
+        return;
+      }
+
+      void loadData();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [loadData, token]);
 
   useEffect(() => {
@@ -74,10 +104,19 @@ export default function HomeScreen() {
 
   const calories = Math.round(data?.totals?.calories ?? 0);
   const mealCount = data?.meal_count ?? 0;
+  const hasTodayMeals = mealCount > 0;
   const ratio = data?.macro_ratio ?? { protein: 0, fat: 0, carbs: 0 };
-  const displayWarnings = data?.ai?.risks?.length ? data.ai.risks : data?.warnings ?? [];
-  const displaySuggestions = data?.ai?.next_actions?.length ? data.ai.next_actions : data?.suggestions ?? [];
-  const analysisSummary = data?.ai?.summary?.trim() || '';
+  const displayWarnings = hasTodayMeals
+    ? data?.ai?.risks?.length
+      ? data.ai.risks
+      : data?.warnings ?? []
+    : ['今日尚未记录餐次，请先记录早餐、午餐或晚餐。'];
+  const displaySuggestions = hasTodayMeals
+    ? data?.ai?.next_actions?.length
+      ? data.ai.next_actions
+      : data?.suggestions ?? []
+    : [];
+  const analysisSummary = hasTodayMeals ? data?.ai?.summary?.trim() || '' : '';
   const trendPoints = useMemo<CalorieTrendBarPoint[]>(
     () =>
       trend.map((item) => ({
@@ -101,7 +140,7 @@ export default function HomeScreen() {
             <Text style={styles.cardTitle}>今日饮食概览</Text>
             <View style={styles.badge}>
               <Sparkle size={12} color={palette.orange500} weight="fill" />
-              <Text style={styles.badgeText}>营养评分 {data?.score ?? 0}</Text>
+              <Text style={styles.badgeText}>{hasTodayMeals ? `营养评分 ${data?.score ?? 0}` : '待记录'}</Text>
             </View>
           </View>
           <View style={styles.summaryRow}>
@@ -135,11 +174,7 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.dualChartRow}>
-          <MacroRatioCard
-            title="脂蛋碳占比"
-            subtitle="按今日摄入供能结构显示"
-            ratio={ratio}
-          />
+          <MacroRatioCard title="脂蛋碳占比" subtitle="按今日摄入供能结构显示" ratio={ratio} />
           <CaloriesTrendCard
             title="热量趋势"
             subtitle="最近 7 天摄入热量变化"
@@ -150,7 +185,9 @@ export default function HomeScreen() {
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>健康提醒</Text>
-          {displayWarnings.length === 0 ? (
+          {!hasTodayMeals ? (
+            <Text style={styles.cardHint}>今日还没有饮食记录，记录后再查看营养分析。</Text>
+          ) : displayWarnings.length === 0 ? (
             <Text style={styles.cardHint}>今日暂无明显饮食禁忌提醒。</Text>
           ) : (
             displayWarnings.map((item) => (
@@ -159,18 +196,23 @@ export default function HomeScreen() {
               </Text>
             ))
           )}
-          <View style={styles.tipDivider} />
-          <Text style={styles.cardTitle}>营养建议</Text>
-          {analysisSummary ? <Text style={styles.analysisSummary}>{analysisSummary}</Text> : null}
-          {displaySuggestions.length === 0 ? (
-            <Text style={styles.cardHint}>继续保持，饮食结构较均衡。</Text>
-          ) : (
-            displaySuggestions.map((item) => (
-              <Text key={item} style={styles.tipItem}>
-                {item}
-              </Text>
-            ))
-          )}
+
+          {hasTodayMeals ? (
+            <>
+              <View style={styles.tipDivider} />
+              <Text style={styles.cardTitle}>营养建议</Text>
+              {analysisSummary ? <Text style={styles.analysisSummary}>{analysisSummary}</Text> : null}
+              {displaySuggestions.length === 0 ? (
+                <Text style={styles.cardHint}>继续保持，饮食结构较均衡。</Text>
+              ) : (
+                displaySuggestions.map((item) => (
+                  <Text key={item} style={styles.tipItem}>
+                    {item}
+                  </Text>
+                ))
+              )}
+            </>
+          ) : null}
         </View>
 
         <View style={styles.card}>
