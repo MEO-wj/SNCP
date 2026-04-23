@@ -131,7 +131,7 @@ def recommend_recipes():
     try:
         external_recipes = external_recipe_service.list_candidates(
             keyword=data.get("keyword"),
-            limit=8,
+            limit=12,
             exclude_names=data.get("exclude_names") if isinstance(data.get("exclude_names"), list) else None,
             refresh_round=_parse_non_negative_int(data.get("refresh_round")),
         )

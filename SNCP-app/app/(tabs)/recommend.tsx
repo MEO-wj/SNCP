@@ -33,6 +33,7 @@ import { subscribeNutritionRefresh } from '@/services/nutrition-refresh';
 type LoadOptions = {
   excludeNames?: string[];
   refreshRound?: number;
+  preferExternal?: boolean;
 };
 
 function getProviderLabel(provider: string): string {
@@ -116,6 +117,7 @@ export default function RecommendScreen() {
             keyword: nextKeyword || undefined,
             exclude_names: options?.excludeNames?.length ? options.excludeNames : undefined,
             refresh_round: options?.refreshRound ?? 0,
+            prefer_external: options?.preferExternal ?? true,
           }),
         ]);
 
@@ -222,6 +224,7 @@ export default function RecommendScreen() {
     void load(keyword, {
       excludeNames: recommendationPosts.map((item) => item.name),
       refreshRound: nextRound,
+      preferExternal: true,
     });
   }, [keyword, load, recommendationPosts, refreshRound]);
 

@@ -17,7 +17,11 @@ from ai_end.services.food_catalog_service import (
     get_catalog_prompt_lines,
     match_food_entry,
 )
-from ai_end.services.recognition_skill import build_visual_recognition_messages
+from ai_end.skills.recipe_recommendation_skill import (
+    build_recipe_recommendation_messages,
+    build_recipe_recommendation_schema,
+)
+from ai_end.skills.recognition_skill import build_visual_recognition_messages
 
 logger = logging.getLogger(__name__)
 
@@ -426,40 +430,7 @@ class AIService:
 
     def _build_recipe_recommendation_messages(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         prepared_payload = self._prepare_for_json(payload)
-        visible_recipes = prepared_payload.get("recipes") or []
-        recipe_names = [str(item.get("name") or "").strip() for item in visible_recipes if item.get("name")]
-        preview_text = ", ".join(recipe_names[:20]) if recipe_names else "none"
-        context = prepared_payload.get("context") or {}
-        exclude_names = [str(item).strip() for item in (context.get("exclude_names") or []) if str(item).strip()]
-        exclude_preview = ", ".join(exclude_names[:12]) if exclude_names else "none"
-
-        system_prompt = (
-            "You are a nutrition recipe recommendation assistant. "
-            "Always respond in Simplified Chinese. "
-            "The input includes the user's local recipe library and external recipe candidates in payload.recipes. "
-            "You should prioritize the user's local recipe library when it is clearly suitable, "
-            "but you may choose external candidates when they better match the user's needs or add useful variety. "
-            "If you choose an existing local recipe, keep its name exactly the same and set source to 'library'. "
-            "If you choose an external candidate, keep its name exactly the same and set source to 'external'. "
-            "Only propose a new recipe when neither local nor external candidates are suitable, and then set source to 'generated'. "
-            "When payload.context.exclude_names is not empty, avoid recommending those recipes if reasonable alternatives exist. "
-            "Return at most 4 items. "
-            "Reasons must be specific to the user's health profile, goals, keyword, and restrictions. "
-            "Return only a JSON object."
-        )
-        user_prompt = (
-            "Please recommend up to 4 recipes based on the user's profile, goals, restrictions, local recipe library, and external candidates.\n"
-            f"Visible recipe names preview: {preview_text}\n"
-            f"Names to avoid when possible: {exclude_preview}\n"
-            "Response format must be a JSON object with this structure:\n"
-            '{"items":[{"name":"","summary":"","reason":"","source":"","tags":[""],"suitable_for":[""]}]}\n'
-            "Payload:\n"
-            f"{json.dumps(prepared_payload, ensure_ascii=False)}"
-        )
-        return [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
+        return build_recipe_recommendation_messages(prepared_payload)
 
     def _recommend_with_zhipu(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         messages = self._build_recipe_recommendation_messages(payload)
@@ -470,78 +441,24 @@ class AIService:
             response_format_type="json_object",
         )
         candidates = self._recommend_with_rules(payload)
-        by_name = {item["name"]: item for item in candidates}
+        by_name = self._build_recipe_candidate_lookup(payload, candidates)
         merged: list[dict[str, Any]] = []
         for item in data.get("items") or []:
-            merged.append({**by_name.get(item["name"], {}), **item})
+            merged.append({**by_name.get(self._normalize_recipe_name(item.get("name")), {}), **item})
         selected = self._apply_recommendation_refresh(merged, payload)
-        return selected[:4] or self._apply_recommendation_refresh(candidates, payload)[:4]
+        return self._ensure_recommendation_source_mix(selected or candidates, payload)
 
     def _recommend_with_openai(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         messages = self._build_recipe_recommendation_messages(payload)
-        schema = {
-            "name": "recipe_recommendations",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "items": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "name": {"type": "string"},
-                                "summary": {"type": "string"},
-                                "reason": {"type": "string"},
-                                "source": {"type": "string"},
-                                "cover_url": {"type": "string"},
-                                "source_url": {"type": "string"},
-                                "source_provider": {"type": "string"},
-                                "ingredients": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "properties": {
-                                            "name": {"type": "string"},
-                                            "amount": {"type": "string"},
-                                        },
-                                        "required": ["name", "amount"],
-                                        "additionalProperties": False,
-                                    },
-                                },
-                                "steps": {"type": "array", "items": {"type": "string"}},
-                                "tags": {"type": "array", "items": {"type": "string"}},
-                                "suitable_for": {"type": "array", "items": {"type": "string"}},
-                            },
-                            "required": [
-                                "name",
-                                "summary",
-                                "reason",
-                                "source",
-                                "cover_url",
-                                "source_url",
-                                "source_provider",
-                                "ingredients",
-                                "steps",
-                                "tags",
-                                "suitable_for",
-                            ],
-                            "additionalProperties": False,
-                        },
-                    }
-                },
-                "required": ["items"],
-                "additionalProperties": False,
-            },
-        }
+        schema = build_recipe_recommendation_schema()
         data = self._chat_completion(messages, schema=schema, max_tokens=1000)
         candidates = self._recommend_with_rules(payload)
-        by_name = {item["name"]: item for item in candidates}
+        by_name = self._build_recipe_candidate_lookup(payload, candidates)
         merged: list[dict[str, Any]] = []
         for item in data.get("items") or []:
-            merged.append({**by_name.get(item["name"], {}), **item})
+            merged.append({**by_name.get(self._normalize_recipe_name(item.get("name")), {}), **item})
         selected = self._apply_recommendation_refresh(merged, payload)
-        return selected[:4] or self._apply_recommendation_refresh(candidates, payload)[:4]
+        return self._ensure_recommendation_source_mix(selected or candidates, payload)
 
     def _recommend_with_rules(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         profile = payload.get("profile") or {}
@@ -623,8 +540,110 @@ class AIService:
             payload,
         )[:4]
         if top:
-            return top
-        return self._apply_recommendation_refresh(self._fallback_recipe_templates(health_tags), payload)[:4]
+            return self._ensure_recommendation_source_mix(top, payload)
+        return self._ensure_recommendation_source_mix(self._fallback_recipe_templates(health_tags), payload)
+
+    def _build_recipe_candidate_lookup(
+        self,
+        payload: dict[str, Any],
+        rule_candidates: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        lookup: dict[str, dict[str, Any]] = {}
+        for recipe in payload.get("recipes") or []:
+            normalized_name = self._normalize_recipe_name(recipe.get("name"))
+            if normalized_name:
+                lookup[normalized_name] = recipe
+        for recipe in rule_candidates:
+            normalized_name = self._normalize_recipe_name(recipe.get("name"))
+            if normalized_name:
+                lookup[normalized_name] = {**lookup.get(normalized_name, {}), **recipe}
+        return lookup
+
+    def _ensure_recommendation_source_mix(
+        self,
+        items: list[dict[str, Any]],
+        payload: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        filtered = self._apply_recommendation_refresh(items, payload)
+        if not filtered:
+            return []
+
+        context = payload.get("context") or {}
+        required_external_count = 2 if context.get("prefer_external") else 1
+        current_external_count = sum(1 for item in filtered if item.get("source") == "external")
+        external_candidates = self._external_recipe_candidates(payload)
+        if current_external_count >= required_external_count or not external_candidates:
+            return filtered[:4]
+
+        mixed = list(filtered[:4])
+        existing_names = {self._normalize_recipe_name(item.get("name")) for item in filtered}
+        for external_item in external_candidates:
+            if current_external_count >= required_external_count:
+                break
+            external_name = self._normalize_recipe_name(external_item.get("name"))
+            if not external_name or external_name in existing_names:
+                continue
+            if len(mixed) < 4:
+                mixed.append(external_item)
+            else:
+                replace_index = next(
+                    (
+                        index
+                        for index in range(len(mixed) - 1, -1, -1)
+                        if mixed[index].get("source") in {None, "", "library", "generated"}
+                    ),
+                    len(mixed) - 1,
+                )
+                mixed[replace_index] = external_item
+            existing_names.add(external_name)
+            current_external_count += 1
+        return mixed[:4]
+
+    def _external_recipe_candidates(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        external_items = [
+            self._enrich_external_recommendation_item(recipe)
+            for recipe in payload.get("recipes") or []
+            if recipe.get("source") == "external" and not self._is_recipe_blocked_by_constraints(recipe, payload)
+        ]
+        refreshed = self._apply_recommendation_refresh(external_items, payload)
+        return sorted(refreshed, key=lambda item: bool(item.get("cover_url")), reverse=True)
+
+    @staticmethod
+    def _enrich_external_recommendation_item(recipe: dict[str, Any]) -> dict[str, Any]:
+        item = dict(recipe)
+        item["source"] = "external"
+        if not item.get("reason"):
+            item["reason"] = "来自外部食谱候选，提供新的搭配思路和配图，可在确认食材适合后尝试。"
+        if not item.get("summary"):
+            item["summary"] = "外部食谱候选，可作为本地菜谱之外的新选择。"
+        return item
+
+    def _is_recipe_blocked_by_constraints(self, recipe: dict[str, Any], payload: dict[str, Any]) -> bool:
+        profile = payload.get("profile") or {}
+        rules = payload.get("rules") or []
+        health_tags = set(profile.get("chronic_conditions") or [])
+        blocked_keywords = {str(item).lower() for item in (profile.get("allergies") or [])}
+        for rule in rules:
+            if rule.get("tag") in health_tags:
+                blocked_keywords.update(str(item).lower() for item in (rule.get("forbidden_foods") or []))
+        if not blocked_keywords:
+            return False
+
+        ingredients = recipe.get("ingredients") or []
+        ingredient_names: list[str] = []
+        for item in ingredients:
+            if isinstance(item, dict):
+                ingredient_names.append(str(item.get("name") or ""))
+            elif item:
+                ingredient_names.append(str(item))
+        searchable_text = " ".join(
+            [
+                str(recipe.get("name") or ""),
+                str(recipe.get("summary") or ""),
+                " ".join(ingredient_names),
+            ]
+        ).lower()
+        return any(keyword and keyword in searchable_text for keyword in blocked_keywords)
 
     def _apply_recommendation_refresh(self, items: list[dict[str, Any]], payload: dict[str, Any]) -> list[dict[str, Any]]:
         if not items:

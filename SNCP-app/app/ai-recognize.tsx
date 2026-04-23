@@ -223,12 +223,15 @@ export default function AIRecognizeScreen() {
         return 'AI 识别';
     }
   }, [recognition?.provider]);
-  const filteredFoods = useMemo(() => {
+  const foodsByCategory = useMemo(() => {
     const keyword = normalizeKeyword(foodPickerKeyword);
-    return FOOD_CATALOG.filter((item) => item.category === foodPickerCategory).filter((item) => {
-      return !keyword || normalizeKeyword(`${item.name}${item.portionHint}${item.id}`).includes(keyword);
-    });
-  }, [foodPickerCategory, foodPickerKeyword]);
+    return FOOD_CATEGORIES.map((category) => ({
+      ...category,
+      foods: FOOD_CATALOG.filter((item) => item.category === category.value).filter((item) => {
+        return !keyword || normalizeKeyword(`${item.name}${item.portionHint}${item.id}`).includes(keyword);
+      }),
+    })).filter((category) => !keyword || category.foods.length > 0);
+  }, [foodPickerKeyword]);
   const weightPickerTargetItem = useMemo(
     () => editableItems.find((item) => item.local_id === weightPickerTargetId) ?? null,
     [editableItems, weightPickerTargetId],
@@ -686,31 +689,41 @@ export default function AIRecognizeScreen() {
               </View>
               <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
                 <View style={styles.list}>
-                  {FOOD_CATEGORIES.map((category) => {
+                  {foodsByCategory.length === 0 ? <Text style={styles.helper}>没有匹配结果，换个关键词试试。</Text> : null}
+                  {foodsByCategory.map((category) => {
                     const active = foodPickerCategory === category.value;
                     return (
-                      <TouchableOpacity key={category.value} activeOpacity={0.88} style={[styles.categoryCard, active && styles.categoryCardActive]} onPress={() => setFoodPickerCategory(category.value)}>
-                        <Text style={[styles.categoryName, active && styles.categoryNameActive]}>{category.label}</Text>
-                        <Text style={styles.categoryHint}>{category.hint}</Text>
-                      </TouchableOpacity>
+                      <View key={category.value} style={styles.categoryBlock}>
+                        <TouchableOpacity activeOpacity={0.88} style={[styles.categoryCard, active && styles.categoryCardActive]} onPress={() => setFoodPickerCategory(active ? '' : category.value)}>
+                          <View style={styles.categoryCardHeader}>
+                            <View style={styles.categoryCardText}>
+                              <Text style={[styles.categoryName, active && styles.categoryNameActive]}>{category.label}</Text>
+                              <Text style={styles.categoryHint}>{category.hint}</Text>
+                            </View>
+                            <Text style={[styles.categoryCount, active && styles.categoryCountActive]}>{category.foods.length} 项</Text>
+                          </View>
+                        </TouchableOpacity>
+                        {active ? (
+                          <View style={styles.categoryFoodList}>
+                            {category.foods.length === 0 ? (
+                              <Text style={styles.helper}>该分类下没有匹配结果，可以换个分类或关键词。</Text>
+                            ) : (
+                              category.foods.map((food) => (
+                                <TouchableOpacity key={food.id} activeOpacity={0.88} style={styles.foodRow} onPress={() => handleSelectFood(food)}>
+                                  <View style={styles.iconWrap}>{renderFoodIcon(food.icon, palette.orange500, 18)}</View>
+                                  <View style={styles.selectorMain}>
+                                    <Text style={styles.selectorName}>{food.name}</Text>
+                                    <Text style={styles.selectorMeta}>{FOOD_CATEGORY_LABELS[food.category]} · 默认 {food.defaultWeightG}g</Text>
+                                    <Text style={styles.note}>{food.portionHint}</Text>
+                                  </View>
+                                </TouchableOpacity>
+                              ))
+                            )}
+                          </View>
+                        ) : null}
+                      </View>
                     );
                   })}
-                </View>
-                <View style={styles.list}>
-                  {filteredFoods.length === 0 ? (
-                    <Text style={styles.helper}>没有匹配结果，换个分类或关键词试试。</Text>
-                  ) : (
-                    filteredFoods.map((food) => (
-                      <TouchableOpacity key={food.id} activeOpacity={0.88} style={styles.foodRow} onPress={() => handleSelectFood(food)}>
-                        <View style={styles.iconWrap}>{renderFoodIcon(food.icon, palette.orange500, 18)}</View>
-                        <View style={styles.selectorMain}>
-                          <Text style={styles.selectorName}>{food.name}</Text>
-                          <Text style={styles.selectorMeta}>{FOOD_CATEGORY_LABELS[food.category]} · 默认 {food.defaultWeightG}g</Text>
-                          <Text style={styles.note}>{food.portionHint}</Text>
-                        </View>
-                      </TouchableOpacity>
-                    ))
-                  )}
                 </View>
               </ScrollView>
             </Pressable>
@@ -1065,6 +1078,7 @@ function createStyles(palette: Palette) {
     },
     searchInput: { flex: 1, fontSize: 14, color: palette.stone800 },
     modalContent: { gap: 14, paddingBottom: 8 },
+    categoryBlock: { gap: 10 },
     categoryCard: {
       borderRadius: 18,
       borderWidth: 1,
@@ -1075,9 +1089,19 @@ function createStyles(palette: Palette) {
       gap: 3,
     },
     categoryCardActive: { borderColor: palette.orange500, backgroundColor: palette.gold50 },
+    categoryCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+    categoryCardText: { flex: 1, gap: 3 },
+    categoryCount: { fontSize: 12, fontWeight: '800', color: palette.stone500 },
+    categoryCountActive: { color: palette.orange500 },
     categoryName: { fontSize: 14, fontWeight: '800', color: palette.stone900 },
     categoryNameActive: { color: palette.orange500 },
     categoryHint: { fontSize: 12, color: palette.stone500 },
+    categoryFoodList: {
+      gap: 10,
+      paddingLeft: 12,
+      borderLeftWidth: 2,
+      borderLeftColor: palette.gold200,
+    },
     foodRow: {
       flexDirection: 'row',
       alignItems: 'center',

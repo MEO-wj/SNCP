@@ -10,6 +10,7 @@ from flask import current_app
 DEFAULT_VERSION = 0
 DASHBOARD_TTL_SECONDS = 60 * 60 * 6
 RECOMMEND_TTL_SECONDS = 60 * 60 * 6
+RECOMMEND_STRATEGY_VERSION = "mixed-external-v2"
 
 
 def get_user_state_version(user_id: UUID | str) -> int:
@@ -112,9 +113,11 @@ def _recipe_recommend_key(user_id: UUID | str, version: int, payload: dict[str, 
 
 def _normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = {
+        "strategy": RECOMMEND_STRATEGY_VERSION,
         "keyword": payload.get("keyword"),
         "tag": payload.get("tag"),
         "exclude_names": payload.get("exclude_names") if isinstance(payload.get("exclude_names"), list) else [],
         "refresh_round": payload.get("refresh_round") or 0,
+        "prefer_external": bool(payload.get("prefer_external")),
     }
     return normalized

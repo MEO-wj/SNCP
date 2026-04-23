@@ -25,7 +25,7 @@ export type RecommendExperienceCache = {
 };
 
 const HOME_CACHE_PREFIX = 'nutrition:home';
-const RECOMMEND_CACHE_PREFIX = 'nutrition:recommend';
+const RECOMMEND_CACHE_PREFIX = 'nutrition:recommend:mixed-external-v2';
 const inMemoryCache = new Map<string, string>();
 
 function buildTodayKey() {
