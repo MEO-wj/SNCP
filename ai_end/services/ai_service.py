@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from decimal import Decimal
 from datetime import date, datetime
@@ -168,7 +169,7 @@ class AIService:
             response.raise_for_status()
             data = response.json()
             return {
-                "items": data.get("items") or [],
+                "items": self._finalize_recipe_items(data.get("items") or [], payload),
                 "provider": "remote",
                 "message": data.get("message"),
             }
@@ -176,12 +177,12 @@ class AIService:
         if self.config.zhipu_api_key:
             try:
                 return {
-                    "items": self._recommend_with_zhipu(payload),
+                    "items": self._finalize_recipe_items(self._recommend_with_zhipu(payload), payload),
                     "provider": "zhipu",
                 }
             except Exception as exc:  # pragma: no cover
                 return {
-                    "items": self._recommend_with_rules(payload),
+                    "items": self._finalize_recipe_items(self._recommend_with_rules(payload), payload),
                     "provider": "rules",
                     "message": f"AI 推荐不可用，已切换为规则推荐: {exc}",
                 }
@@ -189,21 +190,199 @@ class AIService:
         if self.config.openai_api_key:
             try:
                 return {
-                    "items": self._recommend_with_openai(payload),
+                    "items": self._finalize_recipe_items(self._recommend_with_openai(payload), payload),
                     "provider": "openai",
                 }
             except Exception as exc:  # pragma: no cover
                 return {
-                    "items": self._recommend_with_rules(payload),
+                    "items": self._finalize_recipe_items(self._recommend_with_rules(payload), payload),
                     "provider": "rules",
                     "message": f"AI 推荐不可用，已切换为规则推荐: {exc}",
                 }
 
         return {
-            "items": self._recommend_with_rules(payload),
+            "items": self._finalize_recipe_items(self._recommend_with_rules(payload), payload),
             "provider": "rules",
             "message": "未配置推荐服务，已使用本地规则推荐。",
         }
+
+    def _finalize_recipe_items(self, items: list[dict[str, Any]], payload: dict[str, Any]) -> list[dict[str, Any]]:
+        context = payload.get("context") or {}
+        if context.get("library_only"):
+            return self._finalize_library_only_recipe_items(items, payload)
+
+        external_candidates = [
+            recipe
+            for recipe in payload.get("recipes") or []
+            if isinstance(recipe, dict) and recipe.get("source") == "external"
+        ]
+        external_by_url = {
+            str(recipe.get("source_url") or "").strip(): recipe
+            for recipe in external_candidates
+            if str(recipe.get("source_url") or "").strip()
+        }
+        fallback_external_index = 0
+        finalized: list[dict[str, Any]] = []
+
+        for index, raw_item in enumerate(items):
+            item = dict(raw_item)
+            candidate = external_by_url.get(str(item.get("source_url") or "").strip())
+            if item.get("source") == "external" and candidate is None and fallback_external_index < len(external_candidates):
+                candidate = external_candidates[fallback_external_index]
+                fallback_external_index += 1
+
+            for key, fallback in [
+                ("name", f"健康推荐食谱{index + 1}"),
+                ("cuisine", "健康餐"),
+                ("summary", "这道食谱来自候选库，可按少油少盐方式调整。"),
+                ("reason", "该食谱可作为饮食多样化选择，建议结合个人禁忌确认食材。"),
+            ]:
+                item[key] = self._safe_chinese_text(item.get(key), candidate.get(key) if candidate else None, fallback)
+
+            item["tags"] = self._safe_chinese_list(item.get("tags"), candidate.get("tags") if candidate else None)
+            item["suitable_for"] = self._safe_chinese_list(
+                item.get("suitable_for"),
+                candidate.get("suitable_for") if candidate else None,
+            )
+            item["ingredients"] = self._safe_chinese_ingredients(
+                item.get("ingredients"),
+                candidate.get("ingredients") if candidate else None,
+            )
+            item["steps"] = self._safe_chinese_steps(item.get("steps"), candidate.get("steps") if candidate else None)
+            finalized.append(item)
+
+        return finalized
+
+    def _finalize_library_only_recipe_items(self, items: list[dict[str, Any]], payload: dict[str, Any]) -> list[dict[str, Any]]:
+        library_candidates = [
+            recipe
+            for recipe in payload.get("recipes") or []
+            if isinstance(recipe, dict)
+            and recipe.get("source") != "external"
+            and not self._is_recipe_blocked_by_constraints(recipe, payload)
+        ]
+        library_candidates = self._apply_recommendation_refresh(library_candidates, payload)
+        by_name = {
+            self._normalize_recipe_name(recipe.get("name")): recipe
+            for recipe in library_candidates
+            if self._normalize_recipe_name(recipe.get("name"))
+        }
+        by_id = {str(recipe.get("id")): recipe for recipe in library_candidates if recipe.get("id") is not None}
+        selected: list[dict[str, Any]] = []
+        seen_names: set[str] = set()
+
+        for item in items:
+            recipe = by_id.get(str(item.get("recipe_id"))) if item.get("recipe_id") is not None else None
+            recipe = recipe or by_name.get(self._normalize_recipe_name(item.get("name")))
+            if not recipe:
+                continue
+            normalized_name = self._normalize_recipe_name(recipe.get("name"))
+            if not normalized_name or normalized_name in seen_names:
+                continue
+            seen_names.add(normalized_name)
+            selected.append(
+                {
+                    "recipe_id": recipe.get("id"),
+                    "name": recipe.get("name") or item.get("name"),
+                    "cuisine": recipe.get("cuisine") or item.get("cuisine"),
+                    "tags": recipe.get("tags") or item.get("tags") or [],
+                    "suitable_for": recipe.get("suitable_for") or item.get("suitable_for") or [],
+                    "ingredients": recipe.get("ingredients") or [],
+                    "steps": recipe.get("steps") or [],
+                    "nutrition": recipe.get("nutrition") or {},
+                    "cover_url": recipe.get("cover_url") or "",
+                    "source_url": recipe.get("source_url") or "",
+                    "source_provider": recipe.get("source_provider") or "",
+                    "summary": item.get("summary") or recipe.get("summary") or "来自服务器食谱库的推荐。",
+                    "reason": item.get("reason") or "该食谱来自服务器食谱库，可结合当前健康档案作为候选。",
+                    "source": "library",
+                }
+            )
+            if len(selected) >= 4:
+                break
+
+        if selected:
+            return selected
+
+        return [
+            {
+                "recipe_id": recipe.get("id"),
+                "name": recipe.get("name"),
+                "cuisine": recipe.get("cuisine"),
+                "tags": recipe.get("tags") or [],
+                "suitable_for": recipe.get("suitable_for") or [],
+                "ingredients": recipe.get("ingredients") or [],
+                "steps": recipe.get("steps") or [],
+                "nutrition": recipe.get("nutrition") or {},
+                "cover_url": recipe.get("cover_url") or "",
+                "source_url": recipe.get("source_url") or "",
+                "source_provider": recipe.get("source_provider") or "",
+                "summary": recipe.get("summary") or "来自服务器食谱库的推荐。",
+                "reason": "该食谱来自服务器食谱库，可结合当前健康档案作为候选。",
+                "source": "library",
+            }
+            for recipe in library_candidates[:4]
+        ]
+
+    @classmethod
+    def _safe_chinese_text(cls, value: Any, candidate_value: Any, fallback: str) -> str:
+        text = str(value or "").strip()
+        if text and not cls._contains_latin(text):
+            return text
+        candidate_text = str(candidate_value or "").strip()
+        if candidate_text and not cls._contains_latin(candidate_text):
+            return candidate_text
+        return fallback
+
+    @classmethod
+    def _safe_chinese_list(cls, value: Any, candidate_value: Any) -> list[str]:
+        items = [str(item).strip() for item in (value or []) if str(item).strip()] if isinstance(value, list) else []
+        cleaned = [item for item in items if not cls._contains_latin(item)]
+        if cleaned:
+            return cleaned
+        candidate_items = (
+            [str(item).strip() for item in (candidate_value or []) if str(item).strip()]
+            if isinstance(candidate_value, list)
+            else []
+        )
+        return [item for item in candidate_items if not cls._contains_latin(item)]
+
+    @classmethod
+    def _safe_chinese_ingredients(cls, value: Any, candidate_value: Any) -> list[dict[str, str]]:
+        source_items = value if isinstance(value, list) else []
+        candidate_items = candidate_value if isinstance(candidate_value, list) else []
+        result: list[dict[str, str]] = []
+        for index, raw_item in enumerate(source_items):
+            item = raw_item if isinstance(raw_item, dict) else {"name": str(raw_item), "amount": ""}
+            candidate = candidate_items[index] if index < len(candidate_items) and isinstance(candidate_items[index], dict) else {}
+            name = cls._safe_chinese_text(item.get("name"), candidate.get("name"), f"食材{index + 1}")
+            amount = cls._safe_chinese_text(item.get("amount"), candidate.get("amount"), "")
+            result.append({"name": name, "amount": amount})
+        if result:
+            return result
+        for index, raw_candidate in enumerate(candidate_items):
+            if not isinstance(raw_candidate, dict):
+                continue
+            name = cls._safe_chinese_text(raw_candidate.get("name"), None, f"食材{index + 1}")
+            amount = cls._safe_chinese_text(raw_candidate.get("amount"), None, "")
+            result.append({"name": name, "amount": amount})
+        return result
+
+    @classmethod
+    def _safe_chinese_steps(cls, value: Any, candidate_value: Any) -> list[str]:
+        steps = [str(item).strip() for item in (value or []) if str(item).strip()] if isinstance(value, list) else []
+        cleaned = [step for step in steps if not cls._contains_latin(step)]
+        if cleaned:
+            return cleaned
+        candidate_steps = (
+            [str(item).strip() for item in (candidate_value or []) if str(item).strip()]
+            if isinstance(candidate_value, list)
+            else []
+        )
+        cleaned_candidates = [step for step in candidate_steps if not cls._contains_latin(step)]
+        if cleaned_candidates:
+            return cleaned_candidates
+        return ["准备主要食材并清洗切配。", "少油加热后加入食材烹调。", "出锅前少量调味，优先控制盐和油。"]
 
     def _recognize_with_zhipu(
         self,
@@ -821,6 +1000,10 @@ class AIService:
     @staticmethod
     def _normalize_recipe_name(value: Any) -> str:
         return "".join(str(value or "").strip().lower().split())
+
+    @staticmethod
+    def _contains_latin(value: Any) -> bool:
+        return bool(re.search(r"[A-Za-z]", str(value or "")))
 
     @staticmethod
     def _normalize_chat_completion_url(base_url: str) -> str:

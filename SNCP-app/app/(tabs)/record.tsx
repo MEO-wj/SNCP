@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   AppleLogo,
@@ -15,10 +15,12 @@ import {
   Fish,
   ForkKnife,
   Leaf,
+  MagnifyingGlass,
   MoonStars,
   Sparkle,
   SunHorizon,
   Trash,
+  X,
   XCircle,
 } from 'phosphor-react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -133,6 +135,10 @@ function createClientRequestId() {
   return `meal-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function normalizeKeyword(value: string) {
+  return value.trim().toLowerCase();
+}
+
 function renderFoodIcon(icon: FoodIconKey, color: string, size = 18) {
   switch (icon) {
     case 'fish':
@@ -220,7 +226,9 @@ export default function RecordScreen() {
   const [saving, setSaving] = useState(false);
   const [errorText, setErrorText] = useState('');
   const [showAllCategories, setShowAllCategories] = useState(false);
-  const [showAllFoods, setShowAllFoods] = useState(false);
+  const [foodPickerVisible, setFoodPickerVisible] = useState(false);
+  const [foodPickerCategory, setFoodPickerCategory] = useState<FoodCategory | ''>('staple');
+  const [foodPickerKeyword, setFoodPickerKeyword] = useState('');
   const [mealPendingDelete, setMealPendingDelete] = useState<Meal | null>(null);
   const [deleteErrorText, setDeleteErrorText] = useState('');
   const [deletingMealId, setDeletingMealId] = useState<number | null>(null);
@@ -236,11 +244,17 @@ export default function RecordScreen() {
     [showAllCategories],
   );
   const hiddenCategoryCount = FOOD_CATEGORIES.length - displayedCategories.length;
-  const displayedFoods = useMemo(
-    () => (showAllFoods ? visibleFoods : visibleFoods.slice(0, DEFAULT_VISIBLE_FOODS)),
-    [showAllFoods, visibleFoods],
-  );
+  const displayedFoods = useMemo(() => visibleFoods.slice(0, DEFAULT_VISIBLE_FOODS), [visibleFoods]);
   const hiddenFoodCount = visibleFoods.length - displayedFoods.length;
+  const foodsByPickerCategory = useMemo(() => {
+    const keyword = normalizeKeyword(foodPickerKeyword);
+    return FOOD_CATEGORIES.map((category) => ({
+      ...category,
+      foods: FOOD_CATALOG.filter((item) => item.category === category.value).filter((item) => {
+        return !keyword || normalizeKeyword(`${item.name}${item.portionHint}${item.id}`).includes(keyword);
+      }),
+    })).filter((category) => !keyword || category.foods.length > 0);
+  }, [foodPickerKeyword]);
 
   useEffect(() => {
     if (visibleFoods.length === 0) {
@@ -454,7 +468,6 @@ export default function RecordScreen() {
       }
       setSelectedCategory(value);
       setSelectedFoodId('');
-      setShowAllFoods(false);
       navigateWizard('food');
     },
     [navigateWizard, saving, selectedCategory],
@@ -491,8 +504,32 @@ export default function RecordScreen() {
   }, []);
 
   const handleShowMoreFoods = useCallback(() => {
-    setShowAllFoods(true);
-  }, []);
+    setFoodPickerCategory(selectedCategory);
+    setFoodPickerKeyword('');
+    setFoodPickerVisible(true);
+  }, [selectedCategory]);
+
+  const closeFoodPicker = useCallback(() => {
+    setFoodPickerVisible(false);
+    setFoodPickerKeyword('');
+    setFoodPickerCategory(selectedCategory);
+  }, [selectedCategory]);
+
+  const handleFoodPickerSelect = useCallback(
+    (food: FoodCatalogItem) => {
+      if (saving) {
+        return;
+      }
+      setSelectedCategory(food.category);
+      setSelectedFoodId(food.id);
+      setSelectedWeight(food.defaultWeightG);
+      setFoodPickerVisible(false);
+      setFoodPickerKeyword('');
+      setFoodPickerCategory(food.category);
+      navigateWizard('weight');
+    },
+    [navigateWizard, saving],
+  );
 
   const handleOpenDraft = useCallback(() => {
     if (items.length === 0 || wizardStep === 'draft') {
@@ -615,13 +652,13 @@ export default function RecordScreen() {
 
   const handleDeleteMeal = useCallback(
     (meal: Meal) => {
-      if (!token || saving || deletingMealId !== null) {
+      if (!token || deletingMealId !== null) {
         return;
       }
       setDeleteErrorText('');
       setMealPendingDelete(meal);
     },
-    [deletingMealId, performDeleteMeal, saving, token],
+    [deletingMealId, token],
   );
 
   const confirmDeleteMeal = useCallback(async () => {
@@ -1047,10 +1084,10 @@ export default function RecordScreen() {
                         <Pressable
                           style={[
                             styles.mealCardDeleteButton,
-                            (saving || deletingMealId !== null) && styles.mealCardDeleteButtonDisabled,
+                            deletingMealId !== null && styles.mealCardDeleteButtonDisabled,
                           ]}
                           onPress={() => handleDeleteMeal(meal)}
-                          disabled={saving || deletingMealId !== null}
+                          disabled={deletingMealId !== null}
                         >
                           <Trash size={14} color={palette.imperial500} weight="bold" />
                           <Text style={styles.mealCardDeleteText}>删除</Text>
@@ -1088,12 +1125,72 @@ export default function RecordScreen() {
         onTrend={() => router.replace('/(tabs)/trend')}
         onProfile={() => router.replace('/(tabs)/settings')}
       />
-      <Modal
-        visible={!!mealPendingDelete}
-        transparent
-        animationType="fade"
-        onRequestClose={closeDeleteModal}
-      >
+      {foodPickerVisible ? (
+        <View style={styles.foodPickerModalMask}>
+          <Pressable style={styles.foodPickerModalBackdrop} onPress={closeFoodPicker} />
+          <View style={styles.foodPickerSheet}>
+            <View style={styles.foodPickerHandle} />
+            <View style={styles.foodPickerHeader}>
+              <View style={styles.foodPickerHeaderCopy}>
+                <Text style={styles.foodPickerTitle}>选择食物</Text>
+                <Text style={styles.foodPickerSubtitle}>从同一份食物目录里选择，选中后进入重量确认。</Text>
+              </View>
+              <Pressable style={styles.foodPickerCloseButton} onPress={closeFoodPicker}>
+                <X size={16} color={palette.stone700} weight="bold" />
+              </Pressable>
+            </View>
+            <View style={styles.foodPickerSearchBox}>
+              <MagnifyingGlass size={16} color={palette.stone500} weight="bold" />
+              <TextInput
+                style={styles.foodPickerSearchInput}
+                value={foodPickerKeyword}
+                onChangeText={setFoodPickerKeyword}
+                placeholder="搜索食物"
+                placeholderTextColor={palette.stone400}
+              />
+            </View>
+            <ScrollView contentContainerStyle={styles.foodPickerContent} keyboardShouldPersistTaps="handled">
+              <View style={styles.foodPickerList}>
+                {foodsByPickerCategory.length === 0 ? <Text style={styles.foodPickerHelper}>没有匹配结果，换个关键词试试。</Text> : null}
+                {foodsByPickerCategory.map((category) => {
+                  const active = foodPickerCategory === category.value;
+                  return (
+                    <View key={category.value} style={styles.foodPickerCategoryBlock}>
+                      <Pressable
+                        style={[styles.foodPickerCategoryCard, active && styles.foodPickerCategoryCardActive]}
+                        onPress={() => setFoodPickerCategory(active ? '' : category.value)}
+                      >
+                        <View style={styles.foodPickerCategoryHeader}>
+                          <View style={styles.foodPickerCategoryText}>
+                            <Text style={[styles.foodPickerCategoryName, active && styles.foodPickerCategoryNameActive]}>{category.label}</Text>
+                            <Text style={styles.foodPickerCategoryHint}>{category.hint}</Text>
+                          </View>
+                          <Text style={[styles.foodPickerCategoryCount, active && styles.foodPickerCategoryCountActive]}>{category.foods.length} 项</Text>
+                        </View>
+                      </Pressable>
+                      {active ? (
+                        <View style={styles.foodPickerFoodList}>
+                          {category.foods.map((food) => (
+                            <Pressable key={food.id} style={styles.foodPickerFoodRow} onPress={() => handleFoodPickerSelect(food)}>
+                              <View style={styles.foodPickerFoodIcon}>{renderFoodIcon(food.icon, palette.orange500, 18)}</View>
+                              <View style={styles.foodPickerFoodMain}>
+                                <Text style={styles.foodPickerFoodName}>{food.name}</Text>
+                                <Text style={styles.foodPickerFoodMeta}>{FOOD_CATEGORY_LABELS[food.category]} · 默认 {food.defaultWeightG}g</Text>
+                                <Text style={styles.foodPickerFoodHint}>{food.portionHint}</Text>
+                              </View>
+                            </Pressable>
+                          ))}
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      ) : null}
+      {mealPendingDelete ? (
         <View style={styles.deleteModalMask}>
           <View style={styles.deleteModalBackdrop} />
           <View style={styles.deleteModalCard}>
@@ -1191,7 +1288,7 @@ export default function RecordScreen() {
             </View>
           </View>
         </View>
-      </Modal>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -1986,11 +2083,187 @@ function createStyles(palette: Palette, isDark: boolean) {
       fontWeight: '600',
       color: palette.stone700,
     },
-    deleteModalMask: {
+    foodPickerModalMask: {
+      ...StyleSheet.absoluteFillObject,
+      justifyContent: 'flex-end',
+      backgroundColor: modalMask,
+      zIndex: 80,
+      elevation: 80,
+    },
+    foodPickerModalBackdrop: {
+      ...StyleSheet.absoluteFillObject,
+    },
+    foodPickerSheet: {
+      maxHeight: '88%',
+      borderTopLeftRadius: 28,
+      borderTopRightRadius: 28,
+      backgroundColor: panelSurface,
+      borderWidth: 1,
+      borderColor: panelBorder,
+      paddingHorizontal: 18,
+      paddingTop: 10,
+      paddingBottom: 22,
+      gap: 14,
+    },
+    foodPickerHandle: {
+      alignSelf: 'center',
+      width: 52,
+      height: 5,
+      borderRadius: 999,
+      backgroundColor: palette.stone300,
+      marginBottom: 4,
+    },
+    foodPickerHeader: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    foodPickerHeaderCopy: {
       flex: 1,
+      gap: 4,
+    },
+    foodPickerTitle: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: palette.stone900,
+    },
+    foodPickerSubtitle: {
+      fontSize: 13,
+      lineHeight: 20,
+      color: palette.stone600,
+    },
+    foodPickerCloseButton: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: panelSurfaceAlt,
+    },
+    foodPickerSearchBox: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: panelBorder,
+      backgroundColor: panelSurfaceAlt,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    foodPickerSearchInput: {
+      flex: 1,
+      fontSize: 14,
+      color: palette.stone800,
+    },
+    foodPickerContent: {
+      gap: 14,
+      paddingBottom: 8,
+    },
+    foodPickerList: {
+      gap: 12,
+    },
+    foodPickerCategoryBlock: {
+      gap: 10,
+    },
+    foodPickerCategoryCard: {
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: panelBorder,
+      backgroundColor: panelSurfaceAlt,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+    },
+    foodPickerCategoryCardActive: {
+      borderColor: palette.orange500,
+      backgroundColor: activeSurface,
+    },
+    foodPickerCategoryHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    foodPickerCategoryText: {
+      flex: 1,
+      gap: 3,
+    },
+    foodPickerCategoryName: {
+      fontSize: 14,
+      fontWeight: '800',
+      color: palette.stone900,
+    },
+    foodPickerCategoryNameActive: {
+      color: palette.orange500,
+    },
+    foodPickerCategoryHint: {
+      fontSize: 12,
+      color: palette.stone500,
+    },
+    foodPickerCategoryCount: {
+      fontSize: 12,
+      fontWeight: '800',
+      color: palette.stone500,
+    },
+    foodPickerCategoryCountActive: {
+      color: palette.orange500,
+    },
+    foodPickerFoodList: {
+      gap: 10,
+      paddingLeft: 12,
+      borderLeftWidth: 2,
+      borderLeftColor: palette.gold200,
+    },
+    foodPickerFoodRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: panelBorder,
+      backgroundColor: panelSurfaceAlt,
+      paddingHorizontal: 14,
+      paddingVertical: 14,
+    },
+    foodPickerFoodIcon: {
+      width: 42,
+      height: 42,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: badgeSurface,
+    },
+    foodPickerFoodMain: {
+      flex: 1,
+      gap: 4,
+    },
+    foodPickerFoodName: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: palette.stone900,
+    },
+    foodPickerFoodMeta: {
+      fontSize: 13,
+      color: palette.stone600,
+    },
+    foodPickerFoodHint: {
+      fontSize: 12,
+      lineHeight: 17,
+      color: palette.stone500,
+    },
+    foodPickerHelper: {
+      fontSize: 13,
+      lineHeight: 20,
+      color: palette.stone500,
+    },
+    deleteModalMask: {
+      ...StyleSheet.absoluteFillObject,
       justifyContent: 'center',
       paddingHorizontal: 22,
       backgroundColor: modalMask,
+      zIndex: 90,
+      elevation: 90,
     },
     deleteModalBackdrop: {
       ...StyleSheet.absoluteFillObject,

@@ -97,7 +97,7 @@ export default function RegisterScreen() {
                   value={phone}
                   onChangeText={setPhone}
                   placeholder="请输入手机号"
-                  placeholderTextColor={colors.stone300}
+                  placeholderTextColor={colors.stone500}
                   keyboardType="phone-pad"
                   autoCapitalize="none"
                   style={styles.input}
@@ -112,7 +112,7 @@ export default function RegisterScreen() {
                   value={displayName}
                   onChangeText={setDisplayName}
                   placeholder="可填写姓名或称呼"
-                  placeholderTextColor={colors.stone300}
+                  placeholderTextColor={colors.stone500}
                   style={styles.input}
                 />
               </View>
@@ -125,7 +125,7 @@ export default function RegisterScreen() {
                   value={password}
                   onChangeText={setPassword}
                   placeholder="请输入密码"
-                  placeholderTextColor={colors.stone300}
+                  placeholderTextColor={colors.stone500}
                   secureTextEntry
                   style={styles.input}
                 />

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from typing import Any
 
 from flask import Blueprint, jsonify, request
 
@@ -26,7 +25,6 @@ from backend.services.nutrition_service import (
 from backend.repository.profile_repository import ProfileRepository
 from backend.repository.health_rule_repository import HealthRuleRepository
 from backend.repository.recipe_repository import RecipeRepository
-from backend.services.external_recipe_service import ExternalRecipeService
 from backend.utils.request_context import get_request_user_id
 
 bp = Blueprint("ai", __name__)
@@ -36,14 +34,6 @@ ai_service = AIService()
 profile_repo = ProfileRepository()
 rule_repo = HealthRuleRepository()
 recipe_repo = RecipeRepository()
-external_recipe_service = ExternalRecipeService()
-
-
-def _parse_non_negative_int(value: Any) -> int:
-    try:
-        return max(int(value), 0)
-    except (TypeError, ValueError):
-        return 0
 
 
 @bp.route("/recognize", methods=["POST"])
@@ -128,23 +118,14 @@ def recommend_recipes():
     goals = profile_repo.get_goals(user_id) if user_id else None
     rules = rule_repo.list_rules()
     local_recipes = recipe_repo.list_recipes(user_id=user_id, keyword=data.get("keyword"), tag=data.get("tag"))
-    try:
-        external_recipes = external_recipe_service.list_candidates(
-            keyword=data.get("keyword"),
-            limit=12,
-            exclude_names=data.get("exclude_names") if isinstance(data.get("exclude_names"), list) else None,
-            refresh_round=_parse_non_negative_int(data.get("refresh_round")),
-        )
-    except Exception:  # pragma: no cover
-        logger.exception("external recipe fetch failed")
-        external_recipes = []
+    context = {**data, "library_only": True, "prefer_external": False}
     result = ai_service.recommend_recipes(
         {
             "profile": profile or {},
             "goals": goals or default_goals(),
             "rules": rules,
-            "recipes": local_recipes + external_recipes,
-            "context": data,
+            "recipes": local_recipes,
+            "context": context,
         }
     )
     if user_id:

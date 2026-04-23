@@ -33,7 +33,7 @@ export function BottomDock({
   const styles = useMemo(() => createStyles(palette, isDark), [isDark, palette]);
 
   return (
-    <View style={styles.dockWrap}>
+    <View pointerEvents="box-none" style={styles.dockWrap}>
       <BlurView intensity={60} tint={colorScheme === 'dark' ? 'dark' : 'light'} style={styles.dock}>
         <Pressable
           style={[styles.dockButton, activeTab === 'home' && styles.dockButtonHome]}

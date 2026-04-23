@@ -108,7 +108,7 @@ export default function LoginScreen() {
                   value={phone}
                   onChangeText={setPhone}
                   placeholder="请输入手机号"
-                  placeholderTextColor={colors.stone300}
+                  placeholderTextColor={colors.stone500}
                   keyboardType="phone-pad"
                   autoCapitalize="none"
                   style={styles.input}
@@ -123,7 +123,7 @@ export default function LoginScreen() {
                   value={password}
                   onChangeText={setPassword}
                   placeholder="请输入密码"
-                  placeholderTextColor={colors.stone300}
+                  placeholderTextColor={colors.stone500}
                   secureTextEntry
                   style={styles.input}
                 />
