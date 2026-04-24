@@ -564,7 +564,17 @@ export default function AIRecognizeScreen() {
           />
           {errorText ? <Text style={styles.error}>{errorText}</Text> : null}
           <Pressable style={styles.primaryButton} onPress={handleRecognize} disabled={busyMode !== null}>
-            {busyMode === 'recognize' ? <ActivityIndicator color={palette.white} /> : <Text style={styles.primaryButtonText}>开始识别</Text>}
+            {busyMode === 'recognize' ? (
+              <View style={styles.buttonBusyContent}>
+                <ActivityIndicator color={palette.gold50} />
+                <View style={styles.buttonBusyTextWrap}>
+                  <Text style={styles.primaryButtonText}>AI 正在识别图片</Text>
+                  <Text style={styles.primaryButtonHint}>已提交给模型处理，请稍候...</Text>
+                </View>
+              </View>
+            ) : (
+              <Text style={styles.primaryButtonText}>开始识别</Text>
+            )}
           </Pressable>
         </View>
 
@@ -646,7 +656,14 @@ export default function AIRecognizeScreen() {
               <View style={styles.softCard}>
                 <Text style={styles.helper}>你已经修改了识别结果，建议先更新分析再保存。</Text>
                 <TouchableOpacity activeOpacity={0.88} style={styles.secondaryButton} onPress={handleRefreshAnalysis} disabled={busyMode !== null}>
-                  {busyMode === 'analysis' ? <ActivityIndicator color={palette.orange500} /> : <Text style={styles.secondaryButtonText}>更新分析</Text>}
+                  {busyMode === 'analysis' ? (
+                    <View style={styles.inlineBusyContent}>
+                      <ActivityIndicator color={palette.orange500} />
+                      <Text style={styles.secondaryButtonText}>AI 正在更新分析</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.secondaryButtonText}>更新分析</Text>
+                  )}
                 </TouchableOpacity>
               </View>
             ) : null}
@@ -662,7 +679,14 @@ export default function AIRecognizeScreen() {
             ) : null}
 
             <Pressable style={[styles.primaryButton, !editableItems.length && styles.disabled]} onPress={handleSaveMeal} disabled={busyMode !== null || !editableItems.length}>
-              {busyMode === 'save' ? <ActivityIndicator color={palette.white} /> : <Text style={styles.primaryButtonText}>保存为餐次</Text>}
+              {busyMode === 'save' ? (
+                <View style={styles.buttonBusyContent}>
+                  <ActivityIndicator color={palette.gold50} />
+                  <Text style={styles.primaryButtonText}>正在保存餐次</Text>
+                </View>
+              ) : (
+                <Text style={styles.primaryButtonText}>保存为餐次</Text>
+              )}
             </Pressable>
           </View>
         ) : null}
@@ -923,8 +947,29 @@ function createStyles(palette: Palette) {
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: palette.stone900,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
     },
     primaryButtonText: { fontSize: 15, fontWeight: '800', color: palette.gold50 },
+    primaryButtonHint: { fontSize: 11, fontWeight: '600', color: palette.gold100 },
+    buttonBusyContent: {
+      minHeight: 36,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 10,
+    },
+    buttonBusyTextWrap: {
+      flexShrink: 1,
+      alignItems: 'center',
+      gap: 2,
+    },
+    inlineBusyContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+    },
     secondaryButton: {
       minHeight: 44,
       borderRadius: 16,

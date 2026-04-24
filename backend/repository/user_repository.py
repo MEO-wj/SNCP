@@ -38,7 +38,7 @@ class UserRepository:
             cur.execute(
                 """
                 SELECT id, phone, display_name, password_hash, password_algo, password_cost,
-                       roles, created_at, updated_at, last_login_at
+                       roles, avatar_data, created_at, updated_at, last_login_at
                 FROM users
                 WHERE id = %s
                 """,
@@ -65,7 +65,7 @@ class UserRepository:
                     id, phone, display_name, password_hash, password_algo, password_cost
                 ) VALUES (%s, %s, %s, %s, %s, %s)
                 RETURNING id, phone, display_name, password_hash, password_algo, password_cost,
-                          roles, created_at, updated_at, last_login_at
+                          roles, avatar_data, created_at, updated_at, last_login_at
                 """,
                 (
                     uid,
@@ -176,19 +176,20 @@ class UserRepository:
             )
             conn.commit()
 
-    def update_display_name(self, user_id: UUID, display_name: str) -> User:
+    def update_profile(self, user_id: UUID, display_name: str, avatar_data: str | None = None) -> User:
         now = datetime.now(timezone.utc)
         with db_session() as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 UPDATE users
                 SET display_name = %s,
+                    avatar_data = COALESCE(%s, avatar_data),
                     updated_at = %s
                 WHERE id = %s
                 RETURNING id, phone, display_name, password_hash, password_algo, password_cost,
-                          roles, created_at, updated_at, last_login_at
+                          roles, avatar_data, created_at, updated_at, last_login_at
                 """,
-                (display_name, now, user_id),
+                (display_name, avatar_data, now, user_id),
             )
             row = cur.fetchone()
             conn.commit()
@@ -205,6 +206,7 @@ class UserRepository:
             password_algo=row["password_algo"],
             password_cost=row["password_cost"],
             roles=row.get("roles") or [],
+            avatar_data=row.get("avatar_data"),
             created_at=row["created_at"],
             updated_at=row.get("updated_at"),
             last_login_at=row.get("last_login_at"),

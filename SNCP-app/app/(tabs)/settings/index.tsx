@@ -1,8 +1,23 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { PencilSimpleLine, Phone } from 'phosphor-react-native';
+import {
+  CaretRight,
+  CheckCircle,
+  Desktop,
+  Fire,
+  ForkKnife,
+  Heartbeat,
+  Moon,
+  PencilSimpleLine,
+  Phone,
+  Ruler,
+  Scales,
+  SunDim,
+  Target,
+} from 'phosphor-react-native';
 
 import { AmbientBackground } from '@/components/ambient-background';
 import { BottomDock } from '@/components/bottom-dock';
@@ -13,23 +28,28 @@ import {
 } from '@/constants/nutrition-goals';
 import { colors, Palette } from '@/constants/palette';
 import { setAuthToken, useAuthToken } from '@/hooks/use-auth-token';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePalette } from '@/hooks/use-palette';
 import { useUserProfile } from '@/hooks/use-user-profile';
 import { clearAuthStorage, getUserProfileRaw } from '@/storage/auth-storage';
 import { getThemePreference, setThemePreference as saveThemePreference, type ThemePreference } from '@/storage/theme-storage';
+import { fetchMyAccount } from '@/services/account';
 import { fetchGoals, fetchProfile } from '@/services/profile';
 import type { HealthProfile, NutritionGoals } from '@/types/profile';
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const colorScheme = useColorScheme();
   const palette = usePalette();
   const styles = useMemo(() => createStyles(palette), [palette]);
   const token = useAuthToken();
   const userProfile = useUserProfile();
   const [cachedUserProfile, setCachedUserProfile] = useState<{
+    id?: string;
     display_name?: string;
     phone?: string;
     roles?: string[];
+    avatar_url?: string | null;
   } | null>(null);
   const activeUserProfile = cachedUserProfile || userProfile;
   const isAdmin = (activeUserProfile?.roles || []).includes('admin');
@@ -53,7 +73,15 @@ export default function SettingsScreen() {
   const loadCachedUserProfile = useCallback(() => {
     void getUserProfileRaw().then((value) => {
       try {
-        const parsed = value ? (JSON.parse(value) as { display_name?: string; phone?: string; roles?: string[] }) : null;
+        const parsed = value
+          ? (JSON.parse(value) as {
+              id?: string;
+              display_name?: string;
+              phone?: string;
+              roles?: string[];
+              avatar_url?: string | null;
+            })
+          : null;
         setCachedUserProfile(parsed);
       } catch {
         setCachedUserProfile(null);
@@ -61,11 +89,29 @@ export default function SettingsScreen() {
     });
   }, []);
 
+  const loadAccountProfile = useCallback(() => {
+    if (!token) {
+      return;
+    }
+    fetchMyAccount(token)
+      .then((account) => {
+        setCachedUserProfile({
+          id: account.user_id,
+          display_name: account.display_name,
+          phone: account.phone,
+          roles: account.roles || [],
+          avatar_url: account.avatar_url || null,
+        });
+      })
+      .catch(() => {});
+  }, [token]);
+
   useFocusEffect(
     useCallback(() => {
       loadProfileAndGoals();
       loadCachedUserProfile();
-    }, [loadCachedUserProfile, loadProfileAndGoals]),
+      loadAccountProfile();
+    }, [loadAccountProfile, loadCachedUserProfile, loadProfileAndGoals]),
   );
 
   useEffect(() => {
@@ -85,11 +131,73 @@ export default function SettingsScreen() {
     void saveThemePreference(preference);
   };
 
-  const themeOptions: { value: ThemePreference; label: string }[] = [
-    { value: 'system', label: '跟随系统' },
-    { value: 'light', label: '日间' },
-    { value: 'dark', label: '夜间' },
+  const themeOptions: {
+    value: ThemePreference;
+    label: string;
+    description: string;
+    icon: typeof Desktop;
+  }[] = [
+    { value: 'system', label: '跟随系统', description: '自动同步设备', icon: Desktop },
+    { value: 'light', label: '日间', description: '明亮清爽视觉', icon: SunDim },
+    { value: 'dark', label: '夜间', description: '沉浸深暗氛围', icon: Moon },
   ];
+
+  const isThemePanelDark = themePreference === 'dark' || (themePreference === 'system' && colorScheme === 'dark');
+  const themePanelColors = useMemo(
+    () =>
+      isThemePanelDark
+        ? {
+            cardBackground: '#151311',
+            cardBorder: 'rgba(255,255,255,0.06)',
+            title: '#FFF8F2',
+            subtitle: 'rgba(255,255,255,0.68)',
+            titleBadgeBackground: 'rgba(255, 149, 0, 0.14)',
+            titleBadgeBorder: 'rgba(255, 149, 0, 0.28)',
+            rowBackground: 'rgba(255,255,255,0.04)',
+            rowBorder: 'rgba(255,255,255,0.08)',
+            livePillBackground: 'rgba(255,255,255,0.08)',
+            livePillBorder: 'rgba(255,255,255,0.08)',
+            liveText: '#FFF8F2',
+            buttonBackground: 'rgba(255,255,255,0.03)',
+            buttonActiveBackground: 'rgba(255,255,255,0.12)',
+            buttonActiveBorder: 'rgba(255,255,255,0.16)',
+            buttonText: '#FFF8F2',
+            buttonDescription: 'rgba(255,255,255,0.58)',
+            buttonDescriptionActive: 'rgba(255,255,255,0.82)',
+            iconBackground: 'rgba(255,255,255,0.08)',
+            iconBorder: 'rgba(255,255,255,0.08)',
+            inactiveIcon: palette.stone700,
+            glowBackground: 'rgba(255,255,255,0.06)',
+            glowActiveBackground: 'rgba(255, 159, 67, 0.24)',
+            indicator: 'rgba(255,255,255,0.16)',
+          }
+        : {
+            cardBackground: '#FFF7F0',
+            cardBorder: palette.gold100,
+            title: palette.stone850,
+            subtitle: palette.stone600,
+            titleBadgeBackground: '#FFE8D0',
+            titleBadgeBorder: '#FFD4AC',
+            rowBackground: '#FBECDD',
+            rowBorder: '#F3D9BB',
+            livePillBackground: '#FFF1E4',
+            livePillBorder: '#FFDDBA',
+            liveText: palette.stone800,
+            buttonBackground: 'rgba(255,255,255,0.72)',
+            buttonActiveBackground: '#FFFDF9',
+            buttonActiveBorder: '#FFB97A',
+            buttonText: palette.stone850,
+            buttonDescription: palette.stone500,
+            buttonDescriptionActive: palette.stone700,
+            iconBackground: '#FFF4E8',
+            iconBorder: '#F5D8B6',
+            inactiveIcon: palette.stone600,
+            glowBackground: 'rgba(255, 201, 150, 0.28)',
+            glowActiveBackground: 'rgba(255, 159, 67, 0.2)',
+            indicator: 'rgba(81, 74, 70, 0.18)',
+          },
+    [isThemePanelDark, palette.gold100, palette.stone500, palette.stone600, palette.stone700, palette.stone800, palette.stone850],
+  );
 
   const healthSummary = useMemo(() => {
     const values = [
@@ -113,9 +221,46 @@ export default function SettingsScreen() {
   }, [goals]);
 
   const hasCustomGoals = useMemo(() => hasConfiguredNutritionGoals(goals), [goals]);
+  const healthMetricChips = useMemo(
+    () => [
+      { key: 'height', label: '身高', value: profile.height_cm ? `${profile.height_cm}cm` : '待填', icon: Ruler },
+      { key: 'weight', label: '体重', value: profile.weight_kg ? `${profile.weight_kg}kg` : '待填', icon: Scales },
+      {
+        key: 'condition',
+        label: '慢病',
+        value: (profile.chronic_conditions || []).length > 0 ? `${(profile.chronic_conditions || []).length} 项` : '未记录',
+        icon: Heartbeat,
+      },
+    ],
+    [profile],
+  );
+  const goalMetricChips = useMemo(
+    () => [
+      {
+        key: 'calories',
+        label: '热量',
+        value: formatNutritionGoalRange(goals.calories_min, goals.calories_max, 'kcal') || '默认',
+        icon: Fire,
+      },
+      {
+        key: 'protein',
+        label: '蛋白',
+        value: formatNutritionGoalRange(goals.protein_min, goals.protein_max, 'g') || '默认',
+        icon: ForkKnife,
+      },
+      {
+        key: 'status',
+        label: '状态',
+        value: hasCustomGoals ? '已设置' : '推荐值',
+        icon: CheckCircle,
+      },
+    ],
+    [goals, hasCustomGoals],
+  );
 
   const displayName = activeUserProfile?.display_name || '未设置昵称';
   const displayPhone = activeUserProfile?.phone || '--';
+  const avatarUrl = activeUserProfile?.avatar_url || null;
   const avatarSeed = (activeUserProfile?.display_name || activeUserProfile?.phone || '我').trim();
   const avatarText = avatarSeed.slice(0, 1).toUpperCase();
 
@@ -138,13 +283,23 @@ export default function SettingsScreen() {
           <View style={styles.accountHero}>
             <View style={styles.accountHeroMain}>
               <View style={styles.accountAvatar}>
-                <Text style={styles.accountAvatarText}>{avatarText}</Text>
+                {avatarUrl ? (
+                  <Image source={{ uri: avatarUrl }} style={styles.accountAvatarImage} contentFit="cover" />
+                ) : (
+                  <Text style={styles.accountAvatarText}>{avatarText}</Text>
+                )}
+                <View style={styles.accountAvatarBadge}>
+                  <CheckCircle size={13} color={palette.white} weight="fill" />
+                </View>
               </View>
               <View style={styles.accountHeroTextGroup}>
                 <Text style={styles.accountHeroTitle} numberOfLines={1}>
                   {displayName}
                 </Text>
-                <Text style={styles.accountHeroSubtitle}>个人健康档案</Text>
+                <View style={styles.accountHeroBadge}>
+                  <CheckCircle size={13} color={palette.orange500} weight="fill" />
+                  <Text style={styles.accountHeroSubtitle}>账号信息</Text>
+                </View>
               </View>
             </View>
             <Pressable
@@ -161,24 +316,17 @@ export default function SettingsScreen() {
             </Pressable>
           </View>
           <View style={styles.accountInfoGrid}>
-            <View style={styles.accountInfoChip}>
+            <View style={[styles.accountInfoChip, styles.accountInfoChipWide]}>
               <View style={styles.accountInfoHead}>
-                <Phone size={14} color={palette.stone600} weight="bold" />
+                <View style={styles.accountInfoIcon}>
+                  <Phone size={14} color={palette.orange500} weight="bold" />
+                </View>
                 <Text style={styles.metaLabel}>已绑定手机号</Text>
               </View>
               <Text style={styles.metaText} numberOfLines={1}>
                 {displayPhone}
               </Text>
             </View>
-          </View>
-          <View style={styles.accountPatternRow}>
-            <View style={[styles.accountPatternBar, styles.accountPatternBarShort]} />
-            <View style={styles.accountPatternDot} />
-            <View style={[styles.accountPatternBar, styles.accountPatternBarLong]} />
-            <View style={styles.accountPatternCenterDot} />
-            <View style={[styles.accountPatternBar, styles.accountPatternBarLong]} />
-            <View style={styles.accountPatternDot} />
-            <View style={[styles.accountPatternBar, styles.accountPatternBarShort]} />
           </View>
         </View>
 
@@ -188,17 +336,37 @@ export default function SettingsScreen() {
         >
           <View style={styles.entryHead}>
             <View style={styles.entryTitleGroup}>
-              <View style={[styles.entryPill, styles.healthPill]}>
-                <Text style={styles.entryPillText}>健康</Text>
+              <View style={[styles.entryIconBadge, styles.healthIconBadge]}>
+                <Heartbeat size={20} color={palette.orange500} weight="fill" />
               </View>
-              <Text style={styles.cardTitle}>健康档案</Text>
+              <View style={styles.entryTitleTextGroup}>
+                <Text style={styles.cardTitle}>健康档案</Text>
+                <Text style={styles.entryOverline}>个人基础信息</Text>
+              </View>
             </View>
-            <Text style={styles.entryArrow}>›</Text>
+            <CaretRight size={18} color={palette.stone400} weight="bold" />
           </View>
           <Text style={styles.entrySummary} numberOfLines={2}>
             {healthSummary}
           </Text>
-          <Text style={styles.entryHint}>点击进入填写</Text>
+          <View style={styles.entryMetricGrid}>
+            {healthMetricChips.map((item) => {
+              const Icon = item.icon;
+              return (
+                <View key={item.key} style={styles.entryMetricChip}>
+                  <Icon size={16} color={palette.orange500} weight="bold" />
+                  <View style={styles.entryMetricTextGroup}>
+                    <Text style={styles.entryMetricLabel}>{item.label}</Text>
+                    <Text style={styles.entryMetricValue} numberOfLines={1}>{item.value}</Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+          <View style={styles.entryFooter}>
+            <View style={[styles.statusDot, styles.healthStatusDot]} />
+            <Text style={styles.entryHint}>点击进入填写</Text>
+          </View>
         </Pressable>
 
         <Pressable
@@ -207,35 +375,160 @@ export default function SettingsScreen() {
         >
           <View style={styles.entryHead}>
             <View style={styles.entryTitleGroup}>
-              <View style={[styles.entryPill, styles.goalsPill]}>
-                <Text style={styles.entryPillText}>目标</Text>
+              <View style={[styles.entryIconBadge, styles.goalsIconBadge]}>
+                <Target size={20} color={palette.green500} weight="fill" />
               </View>
-              <Text style={styles.cardTitle}>营养目标</Text>
+              <View style={styles.entryTitleTextGroup}>
+                <Text style={styles.cardTitle}>营养目标</Text>
+                <Text style={styles.entryOverline}>每日摄入范围</Text>
+              </View>
             </View>
-            <Text style={styles.entryArrow}>›</Text>
+            <CaretRight size={18} color={palette.stone400} weight="bold" />
           </View>
           <Text style={styles.entrySummary} numberOfLines={2}>
             {goalsSummary}
           </Text>
-          <Text style={styles.entryHint}>
-            {hasCustomGoals ? '点击进入填写' : '未设置时会显示默认建议'}
-          </Text>
+          <View style={styles.entryMetricGrid}>
+            {goalMetricChips.map((item) => {
+              const Icon = item.icon;
+              return (
+                <View key={item.key} style={styles.entryMetricChip}>
+                  <Icon size={16} color={palette.green500} weight="bold" />
+                  <View style={styles.entryMetricTextGroup}>
+                    <Text style={styles.entryMetricLabel}>{item.label}</Text>
+                    <Text style={styles.entryMetricValue} numberOfLines={1}>{item.value}</Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+          <View style={styles.entryFooter}>
+            <View style={[styles.statusDot, hasCustomGoals ? styles.goalsStatusDot : styles.pendingStatusDot]} />
+            <Text style={styles.entryHint}>
+              {hasCustomGoals ? '点击进入填写' : '未设置时会显示默认建议'}
+            </Text>
+          </View>
         </Pressable>
 
-        <View style={[styles.card, styles.themeCard]}>
-          <Text style={styles.cardTitle}>日夜间模式</Text>
-          <View style={styles.themeRow}>
+        <View
+          style={[
+            styles.card,
+            styles.themeCard,
+            { backgroundColor: themePanelColors.cardBackground, borderColor: themePanelColors.cardBorder },
+          ]}
+        >
+          <View style={styles.themeHeader}>
+            <View style={styles.themeTitleGroup}>
+              <View
+                style={[
+                  styles.themeTitleBadge,
+                  {
+                    backgroundColor: themePanelColors.titleBadgeBackground,
+                    borderColor: themePanelColors.titleBadgeBorder,
+                  },
+                ]}
+              >
+                <Moon size={18} color={palette.orange500} weight="fill" />
+              </View>
+              <View style={styles.themeTitleTextGroup}>
+                <Text style={[styles.cardTitle, styles.themeCardTitle, { color: themePanelColors.title }]}>日夜间模式</Text>
+                <Text style={[styles.themeSubtitle, { color: themePanelColors.subtitle }]}>切换专属氛围，让设置也更有仪式感</Text>
+              </View>
+            </View>
+            <View
+              style={[
+                styles.themeLivePill,
+                {
+                  backgroundColor: themePanelColors.livePillBackground,
+                  borderColor: themePanelColors.livePillBorder,
+                },
+              ]}
+            >
+              <View style={styles.themeLiveDot} />
+              <Text style={[styles.themeLiveText, { color: themePanelColors.liveText }]}>
+                当前：{themeOptions.find((option) => option.value === themePreference)?.label || '跟随系统'}
+              </Text>
+            </View>
+          </View>
+          <View
+            style={[
+              styles.themeRow,
+              {
+                backgroundColor: themePanelColors.rowBackground,
+                borderColor: themePanelColors.rowBorder,
+              },
+            ]}
+          >
             {themeOptions.map((option) => {
               const isActive = themePreference === option.value;
+              const Icon = option.icon;
               return (
                 <Pressable
                   key={option.value}
-                  style={[styles.themeButton, isActive && styles.themeButtonActive]}
+                  style={({ pressed }) => [
+                    styles.themeButton,
+                    { backgroundColor: themePanelColors.buttonBackground },
+                    isActive && styles.themeButtonActive,
+                    pressed && styles.themeButtonPressed,
+                    isActive && {
+                      backgroundColor: themePanelColors.buttonActiveBackground,
+                      borderColor: themePanelColors.buttonActiveBorder,
+                    },
+                  ]}
                   onPress={() => handleThemeChange(option.value)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`切换到${option.label}模式`}
                 >
-                  <Text style={[styles.themeButtonText, isActive && styles.themeButtonTextActive]}>
+                  <View
+                    style={[
+                      styles.themeButtonGlow,
+                      { backgroundColor: themePanelColors.glowBackground },
+                      isActive && styles.themeButtonGlowActive,
+                      isActive && { backgroundColor: themePanelColors.glowActiveBackground },
+                    ]}
+                  />
+                  <View
+                    style={[
+                      styles.themeIconWrap,
+                      {
+                        backgroundColor: themePanelColors.iconBackground,
+                        borderColor: themePanelColors.iconBorder,
+                      },
+                      isActive && styles.themeIconWrapActive,
+                    ]}
+                  >
+                    <Icon
+                      size={20}
+                      color={isActive ? '#FFF8F2' : themePanelColors.inactiveIcon}
+                      weight={isActive ? 'fill' : 'bold'}
+                    />
+                  </View>
+                  <Text
+                    style={[
+                      styles.themeButtonText,
+                      { color: themePanelColors.buttonText },
+                      isActive && styles.themeButtonTextActive,
+                    ]}
+                  >
                     {option.label}
                   </Text>
+                  <Text
+                    style={[
+                      styles.themeButtonDescription,
+                      { color: themePanelColors.buttonDescription },
+                      isActive && styles.themeButtonDescriptionActive,
+                      isActive && { color: themePanelColors.buttonDescriptionActive },
+                    ]}
+                  >
+                    {option.description}
+                  </Text>
+                  <View
+                    style={[
+                      styles.themeButtonIndicator,
+                      { backgroundColor: themePanelColors.indicator },
+                      isActive && styles.themeButtonIndicatorActive,
+                    ]}
+                  />
                 </Pressable>
               );
             })}
@@ -313,10 +606,57 @@ function createStyles(palette: Palette) {
       gap: 12,
     },
     themeCard: {
-      borderColor: palette.stone100,
+      gap: 14,
     },
     featureCard: {
       borderColor: palette.stone100,
+    },
+    themeHeader: {
+      gap: 12,
+    },
+    themeTitleGroup: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    themeTitleBadge: {
+      width: 42,
+      height: 42,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+    },
+    themeTitleTextGroup: {
+      flex: 1,
+      gap: 4,
+    },
+    themeSubtitle: {
+      fontSize: 12,
+      lineHeight: 18,
+      fontWeight: '600',
+    },
+    themeCardTitle: {
+    },
+    themeLivePill: {
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
+      borderWidth: 1,
+    },
+    themeLiveDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 999,
+      backgroundColor: palette.orange500,
+    },
+    themeLiveText: {
+      fontSize: 12,
+      fontWeight: '700',
     },
     cardTitle: {
       fontSize: 18,
@@ -362,17 +702,36 @@ function createStyles(palette: Palette) {
       backgroundColor: palette.surfaceWarm,
       alignItems: 'center',
       justifyContent: 'center',
+      position: 'relative',
     },
     accountAvatarText: {
       fontSize: 24,
       fontWeight: '800',
       color: palette.stone800,
     },
+    accountAvatarImage: {
+      width: '100%',
+      height: '100%',
+      borderRadius: 999,
+    },
+    accountAvatarBadge: {
+      position: 'absolute',
+      right: 0,
+      bottom: 2,
+      width: 20,
+      height: 20,
+      borderRadius: 999,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: palette.green500,
+      borderWidth: 2,
+      borderColor: palette.white,
+    },
     accountHeroTextGroup: {
       flex: 1,
       marginLeft: 12,
       marginRight: 8,
-      gap: 2,
+      gap: 6,
     },
     accountHeroTitle: {
       fontSize: 17,
@@ -384,57 +743,50 @@ function createStyles(palette: Palette) {
       color: palette.stone500,
       fontWeight: '600',
     },
-    accountInfoGrid: {
+    accountHeroBadge: {
+      alignSelf: 'flex-start',
       flexDirection: 'row',
-      gap: 10,
+      alignItems: 'center',
+      gap: 5,
+      borderRadius: 999,
+      paddingHorizontal: 9,
+      paddingVertical: 4,
+      backgroundColor: palette.surfaceWarm,
+      borderWidth: 1,
+      borderColor: palette.gold100,
+    },
+    accountInfoGrid: {
+      flexDirection: 'column',
+      gap: 8,
     },
     accountInfoChip: {
-      flex: 1,
+      minHeight: 68,
       gap: 6,
-      backgroundColor: palette.white,
+      backgroundColor: palette.surfaceWarm,
       borderRadius: 14,
       paddingHorizontal: 12,
       paddingVertical: 10,
       borderWidth: 1,
       borderColor: palette.stone100,
     },
+    accountInfoChipWide: {
+      width: '100%',
+    },
     accountInfoHead: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
+      flex: 1,
     },
-    accountPatternRow: {
-      flexDirection: 'row',
+    accountInfoIcon: {
+      width: 22,
+      height: 22,
+      borderRadius: 999,
       alignItems: 'center',
       justifyContent: 'center',
-      gap: 6,
-      opacity: 0.72,
-      paddingHorizontal: 4,
-    },
-    accountPatternBar: {
-      height: 6,
-      borderRadius: 999,
-      backgroundColor: palette.stone300,
-    },
-    accountPatternBarLong: {
-      width: 44,
-    },
-    accountPatternBarShort: {
-      width: 24,
-    },
-    accountPatternDot: {
-      width: 5,
-      height: 5,
-      borderRadius: 999,
-      backgroundColor: palette.stone400,
-      opacity: 0.9,
-    },
-    accountPatternCenterDot: {
-      width: 7,
-      height: 7,
-      borderRadius: 999,
-      backgroundColor: palette.stone500,
-      opacity: 0.9,
+      backgroundColor: palette.white,
+      borderWidth: 1,
+      borderColor: palette.stone100,
     },
     metaLabel: {
       fontSize: 12,
@@ -449,10 +801,10 @@ function createStyles(palette: Palette) {
     entryCard: {
       backgroundColor: palette.white,
       borderRadius: 20,
-      padding: 16,
+      padding: 18,
       borderWidth: 1,
       borderColor: palette.stone100,
-      gap: 8,
+      gap: 12,
       overflow: 'hidden',
       shadowColor: '#000',
       shadowOpacity: 0.05,
@@ -469,38 +821,94 @@ function createStyles(palette: Palette) {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
+      gap: 12,
     },
     entryTitleGroup: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 8,
+      gap: 12,
+      flex: 1,
     },
-    entryPill: {
-      borderRadius: 999,
-      paddingHorizontal: 9,
-      paddingVertical: 4,
+    entryTitleTextGroup: {
+      flex: 1,
+      gap: 2,
     },
-    healthPill: {
+    entryIconBadge: {
+      width: 44,
+      height: 44,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+    },
+    healthIconBadge: {
       backgroundColor: palette.gold100,
+      borderColor: palette.gold200,
     },
-    goalsPill: {
+    goalsIconBadge: {
       backgroundColor: palette.warm100,
+      borderColor: palette.gold100,
     },
-    entryPillText: {
-      fontSize: 11,
+    entryOverline: {
+      fontSize: 12,
       fontWeight: '700',
-      color: palette.stone700,
-    },
-    entryArrow: {
-      color: palette.stone400,
-      fontSize: 22,
-      fontWeight: '500',
-      lineHeight: 22,
+      color: palette.stone500,
     },
     entrySummary: {
       fontSize: 14,
       color: palette.stone700,
       lineHeight: 20,
+    },
+    entryMetricGrid: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    entryMetricChip: {
+      flex: 1,
+      minHeight: 58,
+      borderRadius: 16,
+      paddingHorizontal: 10,
+      paddingVertical: 10,
+      borderWidth: 1,
+      borderColor: palette.stone100,
+      backgroundColor: palette.surfaceWarm,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    entryMetricTextGroup: {
+      flex: 1,
+      gap: 2,
+      minWidth: 0,
+    },
+    entryMetricLabel: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: palette.stone500,
+    },
+    entryMetricValue: {
+      fontSize: 13,
+      fontWeight: '800',
+      color: palette.stone850,
+    },
+    entryFooter: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    statusDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 999,
+    },
+    healthStatusDot: {
+      backgroundColor: palette.orange500,
+    },
+    goalsStatusDot: {
+      backgroundColor: palette.green500,
+    },
+    pendingStatusDot: {
+      backgroundColor: palette.stone400,
     },
     entryHint: {
       fontSize: 12,
@@ -511,28 +919,78 @@ function createStyles(palette: Palette) {
       flexDirection: 'row',
       gap: 8,
       padding: 6,
-      borderRadius: 999,
+      borderRadius: 24,
       borderWidth: 1,
-      borderColor: palette.stone100,
-      backgroundColor: palette.stone100,
     },
     themeButton: {
       flex: 1,
-      borderRadius: 999,
-      paddingVertical: 8,
+      minHeight: 132,
+      borderRadius: 20,
+      paddingHorizontal: 10,
+      paddingVertical: 14,
       alignItems: 'center',
       justifyContent: 'center',
+      gap: 8,
+      position: 'relative',
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: 'transparent',
     },
     themeButtonActive: {
-      backgroundColor: palette.stone900,
+      shadowColor: palette.orange500,
+      shadowOpacity: 0.18,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 6 },
+    },
+    themeButtonPressed: {
+      transform: [{ scale: 0.97 }],
+    },
+    themeButtonGlow: {
+      position: 'absolute',
+      top: -28,
+      width: 84,
+      height: 84,
+      borderRadius: 999,
+      opacity: 0,
+    },
+    themeButtonGlowActive: {
+      opacity: 1,
+    },
+    themeIconWrap: {
+      width: 44,
+      height: 44,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+    },
+    themeIconWrapActive: {
+      backgroundColor: palette.orange500,
+      borderColor: 'rgba(255,255,255,0.18)',
     },
     themeButtonText: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: palette.stone600,
+      fontSize: 14,
+      fontWeight: '800',
     },
     themeButtonTextActive: {
-      color: palette.white,
+    },
+    themeButtonDescription: {
+      fontSize: 11,
+      lineHeight: 16,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+    themeButtonDescriptionActive: {
+    },
+    themeButtonIndicator: {
+      width: 24,
+      height: 4,
+      borderRadius: 999,
+      marginTop: 2,
+    },
+    themeButtonIndicatorActive: {
+      width: 34,
+      backgroundColor: palette.orange500,
     },
     linkButton: {
       backgroundColor: palette.white,

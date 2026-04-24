@@ -3,9 +3,11 @@ import { useEffect, useState } from 'react';
 import { getUserProfileRaw } from '@/storage/auth-storage';
 
 type UserProfile = {
+  id?: string;
   display_name?: string;
   phone?: string;
   roles?: string[];
+  avatar_url?: string | null;
 };
 
 export function useUserProfile() {

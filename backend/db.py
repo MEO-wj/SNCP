@@ -36,11 +36,13 @@ def init_db() -> None:
             password_algo TEXT NOT NULL,
             password_cost INT NOT NULL,
             roles TEXT[] NOT NULL DEFAULT '{}',
+            avatar_data TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             last_login_at TIMESTAMPTZ
         );
         """,
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data TEXT;",
         """
         CREATE TABLE IF NOT EXISTS sessions (
             id UUID PRIMARY KEY,

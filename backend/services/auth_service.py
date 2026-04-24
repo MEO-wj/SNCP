@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import binascii
+import io
 import logging
 import os
 from dataclasses import dataclass
@@ -12,6 +14,7 @@ from typing import Optional
 
 import bcrypt
 import jwt
+from PIL import Image, UnidentifiedImageError
 
 from backend.models.auth import Session, User
 from backend.repository.user_repository import NotFoundError, UserRepository
@@ -33,6 +36,9 @@ class AuthResult:
 
 
 class AuthService:
+    AVATAR_MAX_INPUT_BYTES = 4 * 1024 * 1024
+    AVATAR_SIZE = 256
+
     def __init__(
         self,
         cfg: Config,
@@ -124,13 +130,15 @@ class AuthService:
         self.repo.revoke_session(session.id)
         return self._issue_tokens(user, meta)
 
-    def update_profile(self, user_id: UUID, display_name: str | None = None) -> User:
+    def update_profile(self, user_id: UUID, display_name: str | None = None, avatar_image: str | None = None) -> User:
         normalized_name = (display_name or "").strip()
         if not normalized_name:
             raise ValidationError("昵称不能为空")
         if len(normalized_name) > 30:
             raise ValidationError("昵称长度不能超过30个字符")
-        return self.repo.update_display_name(user_id, normalized_name)
+
+        avatar_data = self._process_avatar_image(avatar_image) if avatar_image else None
+        return self.repo.update_profile(user_id, normalized_name, avatar_data)
 
     def logout(self, refresh_token: str) -> None:
         token = (refresh_token or "").strip()
@@ -204,6 +212,40 @@ class AuthService:
         cost = self._password_cost()
         hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=cost))
         return hashed.decode("utf-8")
+
+    def _process_avatar_image(self, image_payload: str) -> str:
+        payload = (image_payload or "").strip()
+        if not payload:
+            raise ValidationError("头像图片不能为空")
+
+        if "," in payload and payload.split(",", 1)[0].lower().startswith("data:image/"):
+            payload = payload.split(",", 1)[1]
+
+        try:
+            raw = base64.b64decode(payload, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValidationError("头像图片格式不正确") from exc
+
+        if len(raw) > self.AVATAR_MAX_INPUT_BYTES:
+            raise ValidationError("头像图片不能超过4MB")
+
+        try:
+            with Image.open(io.BytesIO(raw)) as img:
+                img = img.convert("RGB")
+                width, height = img.size
+                side = min(width, height)
+                left = (width - side) // 2
+                top = (height - side) // 2
+                img = img.crop((left, top, left + side, top + side))
+                img = img.resize((self.AVATAR_SIZE, self.AVATAR_SIZE), Image.Resampling.LANCZOS)
+
+                output = io.BytesIO()
+                img.save(output, format="JPEG", quality=82, optimize=True)
+        except (UnidentifiedImageError, OSError) as exc:
+            raise ValidationError("头像图片无法识别") from exc
+
+        encoded = base64.b64encode(output.getvalue()).decode("ascii")
+        return f"data:image/jpeg;base64,{encoded}"
 
     def _password_cost(self) -> int:
         if 4 <= self.cfg.auth_password_cost <= 31:

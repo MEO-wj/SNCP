@@ -5,6 +5,7 @@ export type AccountProfile = {
   display_name: string;
   phone: string;
   roles: string[];
+  avatar_url?: string | null;
 };
 
 type UpdateAccountResponse = {
@@ -13,6 +14,7 @@ type UpdateAccountResponse = {
     display_name: string;
     phone: string;
     roles: string[];
+    avatar_url?: string | null;
   };
 };
 
@@ -34,7 +36,7 @@ export async function fetchMyAccount(token: string) {
   return (await resp.json()) as AccountProfile;
 }
 
-export async function updateMyAccount(payload: { display_name: string }, token: string) {
+export async function updateMyAccount(payload: { display_name: string; avatar_image?: string }, token: string) {
   let resp: Response;
   try {
     resp = await fetch(`${getApiBaseUrl()}/auth/me`, {

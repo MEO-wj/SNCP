@@ -21,6 +21,18 @@ user_repo = UserRepository()
 auth_service = AuthService(config, user_repo, logger=logger)
 
 
+def _user_payload(user, include_avatar: bool = False) -> dict[str, Any]:
+    payload = {
+        "id": str(user.id),
+        "phone": user.phone,
+        "display_name": user.display_name,
+        "roles": user.roles,
+    }
+    if include_avatar:
+        payload["avatar_url"] = user.avatar_data
+    return payload
+
+
 def _get_auth_metadata() -> AuthMetadata:
     return AuthMetadata(
         user_agent=request.headers.get("User-Agent"),
@@ -88,12 +100,7 @@ def login():
             "refresh_token": result.refresh_token,
             "token_type": "bearer",
             "expires_in": int(config.auth_access_token_ttl.total_seconds()),
-            "user": {
-                "id": str(result.user.id),
-                "phone": result.user.phone,
-                "display_name": result.user.display_name,
-                "roles": result.user.roles,
-            },
+            "user": _user_payload(result.user),
         }
     ), 200
 
@@ -120,12 +127,7 @@ def register():
             "refresh_token": result.refresh_token,
             "token_type": "bearer",
             "expires_in": int(config.auth_access_token_ttl.total_seconds()),
-            "user": {
-                "id": str(user.id),
-                "phone": user.phone,
-                "display_name": user.display_name,
-                "roles": user.roles,
-            },
+            "user": _user_payload(user),
         }
     ), 201
 
@@ -150,12 +152,7 @@ def refresh():
             "refresh_token": result.refresh_token,
             "token_type": "bearer",
             "expires_in": int(config.auth_access_token_ttl.total_seconds()),
-            "user": {
-                "id": str(result.user.id),
-                "phone": result.user.phone,
-                "display_name": result.user.display_name,
-                "roles": result.user.roles,
-            },
+            "user": _user_payload(result.user),
         }
     ), 200
 
@@ -194,6 +191,7 @@ def get_me():
                 "display_name": user.display_name,
                 "phone": user.phone,
                 "roles": user.roles,
+                    "avatar_url": user.avatar_data,
             }
         ),
         200,
@@ -210,9 +208,10 @@ def update_me():
 
     data = request.get_json(silent=True) or {}
     display_name = data.get("display_name")
+    avatar_image = data.get("avatar_image")
 
     try:
-        user = auth_service.update_profile(UUID(str(user_id)), display_name)
+        user = auth_service.update_profile(UUID(str(user_id)), display_name, avatar_image)
     except ValidationError as exc:
         return jsonify({"error": str(exc)}), 400
     except (ValueError, NotFoundError):
@@ -224,12 +223,7 @@ def update_me():
     return (
         jsonify(
             {
-                "user": {
-                    "id": str(user.id),
-                    "phone": user.phone,
-                    "display_name": user.display_name,
-                    "roles": user.roles,
-                }
+                "user": _user_payload(user, include_avatar=True)
             }
         ),
         200,

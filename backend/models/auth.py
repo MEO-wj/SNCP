@@ -15,6 +15,7 @@ class User:
     password_algo: str
     password_cost: int
     roles: list[str]
+    avatar_data: Optional[str]
     created_at: datetime
     updated_at: Optional[datetime]
     last_login_at: Optional[datetime]
