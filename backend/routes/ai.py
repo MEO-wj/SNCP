@@ -128,6 +128,7 @@ def recommend_recipes():
             "context": context,
         }
     )
+    result = {**result, "recipes": local_recipes}
     if user_id:
         set_recipe_recommend_cache(user_id, state_version, data, result)
     return jsonify(result), 200

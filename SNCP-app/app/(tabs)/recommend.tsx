@@ -34,6 +34,8 @@ type LoadOptions = {
   silent?: boolean;
 };
 
+const RECOMMEND_CACHE_FRESH_MS = 15 * 60 * 1000;
+
 function getProviderLabel(provider: string): string {
   switch (provider) {
     case 'zhipu':
@@ -56,6 +58,14 @@ function getRecipeMetaText(recipe: RecipePost): string {
 
 function keepLibraryPosts(posts: RecipePost[]): RecipePost[] {
   return posts.filter((post) => post.source === 'library');
+}
+
+function isFreshRecommendCache(cached: RecommendExperienceCache | null): boolean {
+  if (!cached?.updatedAt) {
+    return false;
+  }
+  const updatedAt = new Date(cached.updatedAt).getTime();
+  return Number.isFinite(updatedAt) && Date.now() - updatedAt < RECOMMEND_CACHE_FRESH_MS;
 }
 
 export default function RecommendScreen() {
@@ -110,17 +120,26 @@ export default function RecommendScreen() {
       }
 
       try {
-        const [libraryResult, aiResult] = await Promise.allSettled([
-          fetchRecipes(token, nextKeyword || undefined),
-          recommendRecipes(token, {
-            keyword: nextKeyword || undefined,
-            exclude_names: options?.excludeNames?.length ? options.excludeNames : undefined,
-            refresh_round: options?.refreshRound ?? 0,
-          }),
-        ]);
-
         let nextErrorText = '';
         let basePosts: RecipePost[] = [];
+
+        const aiResult = await recommendRecipes(token, {
+          keyword: nextKeyword || undefined,
+          exclude_names: options?.excludeNames?.length ? options.excludeNames : undefined,
+          refresh_round: options?.refreshRound ?? 0,
+        })
+          .then((value) => ({ status: 'fulfilled' as const, value }))
+          .catch((reason) => ({ status: 'rejected' as const, reason }));
+
+        const libraryResult =
+          aiResult.status === 'fulfilled' && aiResult.value.recipes
+            ? {
+                status: 'fulfilled' as const,
+                value: { recipes: aiResult.value.recipes },
+              }
+            : await fetchRecipes(token, nextKeyword || undefined)
+                .then((value) => ({ status: 'fulfilled' as const, value }))
+                .catch((reason) => ({ status: 'rejected' as const, reason }));
 
         if (libraryResult.status === 'fulfilled') {
           basePosts = keepLibraryPosts(mapLibraryRecipesToPosts(libraryResult.value.recipes || []));
@@ -187,6 +206,9 @@ export default function RecommendScreen() {
       }
 
       if (applyCachedState(cached)) {
+        if (isFreshRecommendCache(cached)) {
+          return;
+        }
         void load('', { refreshRound: 0, silent: true });
         return;
       }
@@ -208,7 +230,11 @@ export default function RecommendScreen() {
   const handleSearch = useCallback(() => {
     setRefreshRound(0);
     void (async () => {
-      const hasCache = applyCachedState(await readRecommendExperienceCache(keyword));
+      const cached = await readRecommendExperienceCache(keyword);
+      const hasCache = applyCachedState(cached);
+      if (hasCache && isFreshRecommendCache(cached)) {
+        return;
+      }
       void load(keyword, { refreshRound: 0, silent: hasCache });
     })();
   }, [applyCachedState, keyword, load]);
@@ -351,11 +377,11 @@ export default function RecommendScreen() {
 
       <BottomDock
         activeTab="recommend"
-        onHome={() => router.replace('/(tabs)')}
-        onRecord={() => router.replace('/(tabs)/record')}
-        onRecommend={() => router.replace('/(tabs)/recommend')}
-        onTrend={() => router.replace('/(tabs)/trend')}
-        onProfile={() => router.replace('/(tabs)/settings')}
+        onHome={() => router.navigate('/(tabs)')}
+        onRecord={() => router.navigate('/(tabs)/record')}
+        onRecommend={() => router.navigate('/(tabs)/recommend')}
+        onTrend={() => router.navigate('/(tabs)/trend')}
+        onProfile={() => router.navigate('/(tabs)/settings')}
       />
     </SafeAreaView>
   );

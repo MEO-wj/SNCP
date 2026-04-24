@@ -1,4 +1,5 @@
 import type { NutritionValues } from '@/types/nutrition';
+import type { Recipe } from '@/types/recipe';
 
 export type AiRecognizedItem = {
   name: string;
@@ -61,6 +62,7 @@ export type AiRecommendationItem = {
 
 export type AiRecommendationResult = {
   items: AiRecommendationItem[];
+  recipes?: Recipe[];
   provider: string;
   message?: string;
 };

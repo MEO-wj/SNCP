@@ -368,11 +368,11 @@ export default function MealHistoryScreen() {
 
       <BottomDock
         activeTab="record"
-        onHome={() => router.replace('/(tabs)')}
-        onRecord={() => router.replace('/(tabs)/record')}
-        onRecommend={() => router.replace('/(tabs)/recommend')}
-        onTrend={() => router.replace('/(tabs)/trend')}
-        onProfile={() => router.replace('/(tabs)/settings')}
+        onHome={() => router.navigate('/(tabs)')}
+        onRecord={() => router.navigate('/(tabs)/record')}
+        onRecommend={() => router.navigate('/(tabs)/recommend')}
+        onTrend={() => router.navigate('/(tabs)/trend')}
+        onProfile={() => router.navigate('/(tabs)/settings')}
       />
       <Modal
         visible={!!mealPendingDelete}

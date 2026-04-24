@@ -156,6 +156,14 @@ class AIService:
         }
 
     def recommend_recipes(self, payload: dict[str, Any]) -> dict[str, Any]:
+        rule_items = self._recommend_with_rules(payload)
+        if not self._should_enhance_recommendation_with_ai(payload):
+            return {
+                "items": self._finalize_recipe_items(rule_items, payload),
+                "provider": "rules",
+                "message": "已使用本地规则快速推荐，可按需启用 AI 增强推荐理由。",
+            }
+
         if self.config.ai_recipe_recommend_url:
             headers = {"Content-Type": "application/json"}
             if self.config.ai_recipe_recommend_key:
@@ -205,6 +213,69 @@ class AIService:
             "provider": "rules",
             "message": "未配置推荐服务，已使用本地规则推荐。",
         }
+
+    @staticmethod
+    def _should_enhance_recommendation_with_ai(payload: dict[str, Any]) -> bool:
+        context = payload.get("context") or {}
+        value = context.get("ai_enhance")
+        if isinstance(value, bool):
+            return value
+        return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    def _build_ai_recommendation_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        context = payload.get("context") or {}
+        return {
+            "profile": self._compact_recommendation_profile(payload.get("profile") or {}),
+            "goals": self._compact_recommendation_goals(payload.get("goals") or {}),
+            "rules": self._compact_recommendation_rules(payload.get("rules") or [], payload),
+            "recipes": self._recommendation_candidates_for_ai(payload),
+            "context": {
+                "keyword": context.get("keyword"),
+                "tag": context.get("tag"),
+                "exclude_names": context.get("exclude_names") or [],
+                "refresh_round": context.get("refresh_round") or 0,
+                "library_only": True,
+                "prefer_external": False,
+            },
+        }
+
+    @staticmethod
+    def _compact_recommendation_profile(profile: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "chronic_conditions": profile.get("chronic_conditions") or [],
+            "allergies": profile.get("allergies") or [],
+            "taste_preferences": profile.get("taste_preferences") or [],
+        }
+
+    @staticmethod
+    def _compact_recommendation_goals(goals: dict[str, Any]) -> dict[str, Any]:
+        keys = [
+            "calories_min",
+            "calories_max",
+            "protein_min",
+            "protein_max",
+            "fat_min",
+            "fat_max",
+            "carbs_min",
+            "carbs_max",
+            "sodium_max",
+            "sugar_max",
+        ]
+        return {key: goals.get(key) for key in keys if goals.get(key) is not None}
+
+    @staticmethod
+    def _compact_recommendation_rules(rules: list[dict[str, Any]], payload: dict[str, Any]) -> list[dict[str, Any]]:
+        profile = payload.get("profile") or {}
+        health_tags = set(profile.get("chronic_conditions") or [])
+        return [
+            {
+                "tag": rule.get("tag"),
+                "forbidden_foods": rule.get("forbidden_foods") or [],
+                "tips": rule.get("tips") or [],
+            }
+            for rule in rules
+            if not health_tags or rule.get("tag") in health_tags
+        ]
 
     def _finalize_recipe_items(self, items: list[dict[str, Any]], payload: dict[str, Any]) -> list[dict[str, Any]]:
         context = payload.get("context") or {}
@@ -608,34 +679,51 @@ class AIService:
         return max(0, min(score, 100))
 
     def _build_recipe_recommendation_messages(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
-        prepared_payload = self._prepare_for_json(payload)
+        prepared_payload = self._prepare_for_json(self._build_ai_recommendation_payload(payload))
         return build_recipe_recommendation_messages(prepared_payload)
 
     def _recommend_with_zhipu(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
-        messages = self._build_recipe_recommendation_messages(payload)
+        ai_payload = self._build_ai_recommendation_payload(payload)
+        messages = build_recipe_recommendation_messages(self._prepare_for_json(ai_payload))
         data = self._zhipu_chat_completion(
             messages,
             model=self.config.zhipu_text_model,
-            max_tokens=1000,
+            max_tokens=500,
             response_format_type="json_object",
+            retry_on_rate_limit=False,
         )
-        candidates = self._recommend_with_rules(payload)
-        by_name = self._build_recipe_candidate_lookup(payload, candidates)
+        candidates = ai_payload.get("recipes") or self._recommend_with_rules(payload)
+        by_name = self._build_recipe_candidate_lookup(ai_payload, candidates)
+        by_id = {
+            str(item.get("recipe_id") or item.get("id")): item
+            for item in candidates
+            if item.get("recipe_id") is not None or item.get("id") is not None
+        }
         merged: list[dict[str, Any]] = []
         for item in data.get("items") or []:
-            merged.append({**by_name.get(self._normalize_recipe_name(item.get("name")), {}), **item})
+            candidate = by_id.get(str(item.get("recipe_id"))) if item.get("recipe_id") is not None else None
+            candidate = candidate or by_name.get(self._normalize_recipe_name(item.get("name")), {})
+            merged.append({**candidate, **item})
         selected = self._apply_recommendation_refresh(merged, payload)
         return self._ensure_recommendation_source_mix(selected or candidates, payload)
 
     def _recommend_with_openai(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
-        messages = self._build_recipe_recommendation_messages(payload)
+        ai_payload = self._build_ai_recommendation_payload(payload)
+        messages = build_recipe_recommendation_messages(self._prepare_for_json(ai_payload))
         schema = build_recipe_recommendation_schema()
-        data = self._chat_completion(messages, schema=schema, max_tokens=1000)
-        candidates = self._recommend_with_rules(payload)
-        by_name = self._build_recipe_candidate_lookup(payload, candidates)
+        data = self._chat_completion(messages, schema=schema, max_tokens=500)
+        candidates = ai_payload.get("recipes") or self._recommend_with_rules(payload)
+        by_name = self._build_recipe_candidate_lookup(ai_payload, candidates)
+        by_id = {
+            str(item.get("recipe_id") or item.get("id")): item
+            for item in candidates
+            if item.get("recipe_id") is not None or item.get("id") is not None
+        }
         merged: list[dict[str, Any]] = []
         for item in data.get("items") or []:
-            merged.append({**by_name.get(self._normalize_recipe_name(item.get("name")), {}), **item})
+            candidate = by_id.get(str(item.get("recipe_id"))) if item.get("recipe_id") is not None else None
+            candidate = candidate or by_name.get(self._normalize_recipe_name(item.get("name")), {})
+            merged.append({**candidate, **item})
         selected = self._apply_recommendation_refresh(merged, payload)
         return self._ensure_recommendation_source_mix(selected or candidates, payload)
 
@@ -721,6 +809,44 @@ class AIService:
         if top:
             return self._ensure_recommendation_source_mix(top, payload)
         return self._ensure_recommendation_source_mix(self._fallback_recipe_templates(health_tags), payload)
+
+    def _recommendation_candidates_for_ai(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        primary = self._recommend_with_rules(payload)
+        seen_names = {self._normalize_recipe_name(item.get("name")) for item in primary}
+        candidates = list(primary)
+
+        for recipe in payload.get("recipes") or []:
+            if not isinstance(recipe, dict) or self._is_recipe_blocked_by_constraints(recipe, payload):
+                continue
+            normalized_name = self._normalize_recipe_name(recipe.get("name"))
+            if not normalized_name or normalized_name in seen_names:
+                continue
+            candidates.append(recipe)
+            seen_names.add(normalized_name)
+            if len(candidates) >= 12:
+                break
+
+        return [self._compact_recommendation_recipe(item) for item in candidates[:12]]
+
+    @staticmethod
+    def _compact_recommendation_recipe(recipe: dict[str, Any]) -> dict[str, Any]:
+        nutrition = recipe.get("nutrition") or {}
+        return {
+            "recipe_id": recipe.get("recipe_id") or recipe.get("id"),
+            "name": recipe.get("name"),
+            "cuisine": recipe.get("cuisine"),
+            "tags": recipe.get("tags") or [],
+            "suitable_for": recipe.get("suitable_for") or [],
+            "nutrition": {
+                "calories": nutrition.get("calories"),
+                "protein": nutrition.get("protein"),
+                "fat": nutrition.get("fat"),
+                "carbs": nutrition.get("carbs"),
+                "sodium": nutrition.get("sodium"),
+                "sugar": nutrition.get("sugar"),
+            },
+            "summary": recipe.get("summary") or "",
+        }
 
     def _build_recipe_candidate_lookup(
         self,
@@ -911,6 +1037,7 @@ class AIService:
         model: str,
         max_tokens: int,
         response_format_type: str | None = None,
+        retry_on_rate_limit: bool = True,
     ) -> dict[str, Any]:
         url = self._normalize_chat_completion_url(self.config.zhipu_base_url)
         headers = {
@@ -933,7 +1060,11 @@ class AIService:
             try:
                 self._raise_for_status_with_details(response, provider=provider)
             except requests.HTTPError:
-                if not self._should_retry_zhipu_response(response) or attempt >= len(ZHIPU_RETRY_DELAYS_SECONDS):
+                if (
+                    not retry_on_rate_limit
+                    or not self._should_retry_zhipu_response(response)
+                    or attempt >= len(ZHIPU_RETRY_DELAYS_SECONDS)
+                ):
                     raise
                 delay_seconds = ZHIPU_RETRY_DELAYS_SECONDS[attempt]
                 error_code = self._extract_error_code(response) or "unknown"

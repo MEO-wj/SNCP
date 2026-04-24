@@ -7,6 +7,8 @@ from typing import Any
 
 RECIPE_RECOMMENDATION_SKILL_NAME = "服务器食谱库推荐技能"
 
+MAX_MODEL_RECIPE_CANDIDATES = 12
+
 RECIPE_RECOMMENDATION_SKILL_SPEC = dedent(
     """
     你是健康食谱推荐助手。当前产品策略是“只从服务器已有食谱库中搜索和推荐”，暂时不引入外部食谱，也不生成新食谱。
@@ -35,15 +37,47 @@ RECIPE_RECOMMENDATION_SKILL_SPEC = dedent(
 ).strip()
 
 
+def _compact_payload_for_model(payload: dict[str, Any]) -> dict[str, Any]:
+    recipes = payload.get("recipes") or []
+    return {
+        "profile": payload.get("profile") or {},
+        "goals": payload.get("goals") or {},
+        "rules": payload.get("rules") or [],
+        "context": payload.get("context") or {},
+        "recipes": [_compact_recipe_for_model(recipe) for recipe in recipes[:MAX_MODEL_RECIPE_CANDIDATES]],
+    }
+
+
+def _compact_recipe_for_model(recipe: dict[str, Any]) -> dict[str, Any]:
+    nutrition = recipe.get("nutrition") or {}
+    return {
+        "recipe_id": recipe.get("recipe_id") or recipe.get("id"),
+        "name": recipe.get("name"),
+        "cuisine": recipe.get("cuisine"),
+        "tags": recipe.get("tags") or [],
+        "suitable_for": recipe.get("suitable_for") or [],
+        "nutrition": {
+            "calories": nutrition.get("calories"),
+            "protein": nutrition.get("protein"),
+            "fat": nutrition.get("fat"),
+            "carbs": nutrition.get("carbs"),
+            "sodium": nutrition.get("sodium"),
+            "sugar": nutrition.get("sugar"),
+        },
+        "summary": recipe.get("summary") or "",
+    }
+
+
 def build_recipe_recommendation_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    visible_recipes = payload.get("recipes") or []
+    model_payload = _compact_payload_for_model(payload)
+    visible_recipes = model_payload.get("recipes") or []
     recipe_names = [
         str(item.get("name") or "").strip()
         for item in visible_recipes
         if item.get("name")
     ]
-    recipe_preview = ", ".join(recipe_names[:24]) if recipe_names else "none"
-    context = payload.get("context") or {}
+    recipe_preview = ", ".join(recipe_names[:MAX_MODEL_RECIPE_CANDIDATES]) if recipe_names else "none"
+    context = model_payload.get("context") or {}
     exclude_names = [str(item).strip() for item in (context.get("exclude_names") or []) if str(item).strip()]
     exclude_preview = ", ".join(exclude_names[:12]) if exclude_names else "none"
 
@@ -53,9 +87,9 @@ def build_recipe_recommendation_messages(payload: dict[str, Any]) -> list[dict[s
         f"尽量避免重复推荐：{exclude_preview}\n"
         "如果候选不足或不适合，可以返回空 items；不要使用外部食谱，不要生成新食谱。\n"
         "返回格式必须是 JSON 对象，结构如下：\n"
-        '{"items":[{"recipe_id":null,"name":"","summary":"","reason":"","source":"library","cover_url":"","source_url":"","source_provider":"","ingredients":[{"name":"","amount":""}],"steps":[""],"nutrition":{},"tags":[""],"suitable_for":[""]}]}\n'
+        '{"items":[{"recipe_id":null,"name":"","summary":"","reason":"","source":"library","tags":[""],"suitable_for":[""]}]}\n'
         "Payload:\n"
-        f"{json.dumps(payload, ensure_ascii=False)}"
+        f"{json.dumps(model_payload, ensure_ascii=False)}"
     )
 
     return [
@@ -89,23 +123,6 @@ def build_recipe_recommendation_schema() -> dict[str, Any]:
                             "summary": {"type": "string"},
                             "reason": {"type": "string"},
                             "source": {"type": "string", "enum": ["library"]},
-                            "cover_url": {"type": "string"},
-                            "source_url": {"type": "string"},
-                            "source_provider": {"type": "string"},
-                            "ingredients": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "name": {"type": "string"},
-                                        "amount": {"type": "string"},
-                                    },
-                                    "required": ["name", "amount"],
-                                    "additionalProperties": False,
-                                },
-                            },
-                            "steps": {"type": "array", "items": {"type": "string"}},
-                            "nutrition": {"type": "object"},
                             "tags": {"type": "array", "items": {"type": "string"}},
                             "suitable_for": {"type": "array", "items": {"type": "string"}},
                         },
@@ -115,12 +132,6 @@ def build_recipe_recommendation_schema() -> dict[str, Any]:
                             "summary",
                             "reason",
                             "source",
-                            "cover_url",
-                            "source_url",
-                            "source_provider",
-                            "ingredients",
-                            "steps",
-                            "nutrition",
                             "tags",
                             "suitable_for",
                         ],
