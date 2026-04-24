@@ -1,6 +1,8 @@
 export type Recipe = {
   id: number | string;
   name: string;
+  source?: string;
+  library_scope?: 'local' | 'server';
   cuisine?: string | null;
   tags?: string[];
   ingredients?: { name: string; amount?: string }[];

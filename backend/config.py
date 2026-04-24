@@ -24,6 +24,10 @@ class Config:
         self.auth_password_cost: int = 12
         self.auth_refresh_hash_key: Optional[str] = None
         self.admin_phones: list[str] = []
+        self.admin_login_name: str = "admin"
+        self.admin_phone: str = "00000000000"
+        self.admin_display_name: str = "管理员"
+        self.admin_password: str = "795348503"
         self.redis_host: str = "localhost"
         self.redis_port: int = 6379
         self.redis_db: int = 0
@@ -89,6 +93,10 @@ class Config:
             "AUTH_PASSWORD_COST",
             "AUTH_REFRESH_HASH_KEY",
             "ADMIN_PHONES",
+            "ADMIN_LOGIN_NAME",
+            "ADMIN_PHONE",
+            "ADMIN_DISPLAY_NAME",
+            "ADMIN_PASSWORD",
             "REDIS_HOST",
             "REDIS_PORT",
             "REDIS_DB",
@@ -150,6 +158,14 @@ class Config:
             self.auth_refresh_hash_key = value or None
         elif key == "ADMIN_PHONES":
             self.admin_phones = [part.strip() for part in value.split(",") if part.strip()]
+        elif key == "ADMIN_LOGIN_NAME":
+            self.admin_login_name = value or self.admin_login_name
+        elif key == "ADMIN_PHONE":
+            self.admin_phone = value or self.admin_phone
+        elif key == "ADMIN_DISPLAY_NAME":
+            self.admin_display_name = value or self.admin_display_name
+        elif key == "ADMIN_PASSWORD":
+            self.admin_password = value or self.admin_password
         elif key == "REDIS_HOST":
             self.redis_host = value
         elif key == "REDIS_PORT":

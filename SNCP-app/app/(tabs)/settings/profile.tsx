@@ -277,15 +277,26 @@ export default function ProfileDetailScreen() {
     const initialYear = normalizeYear(profile.birth_year);
     setPendingYear(initialYear);
     setYearPickerVisible(true);
-    requestAnimationFrame(() => {
+    // Android 上弹层初次打开时，FlatList 可能还未完成测量，延后一点滚动可避免“拉不动”。
+    setTimeout(() => {
       scrollToYear(initialYear, false);
-    });
+    }, 40);
   };
 
   const syncPendingYearByOffset = (offsetY: number) => {
+    const safeOffsetY = Number.isFinite(offsetY) ? offsetY : 0;
+    const rawIndex = Math.round(safeOffsetY / YEAR_ITEM_HEIGHT);
+    const index = Math.min(Math.max(rawIndex, 0), yearOptions.length - 1);
+    const nextYear = yearOptions[index];
+    setPendingYear((prev) => (prev === nextYear ? prev : nextYear));
+  };
+
+  const snapYearByOffset = (offsetY: number, animated: boolean) => {
     const rawIndex = Math.round(offsetY / YEAR_ITEM_HEIGHT);
     const index = Math.min(Math.max(rawIndex, 0), yearOptions.length - 1);
-    setPendingYear(yearOptions[index]);
+    yearListRef.current?.scrollToOffset({ offset: index * YEAR_ITEM_HEIGHT, animated });
+    const nextYear = yearOptions[index];
+    setPendingYear((prev) => (prev === nextYear ? prev : nextYear));
   };
 
   return (
@@ -421,13 +432,32 @@ export default function ProfileDetailScreen() {
                   offset: YEAR_ITEM_HEIGHT * index,
                   index,
                 })}
-                onScrollToIndexFailed={() => {}}
+                onScrollToIndexFailed={({ index }) => {
+                  const boundedIndex = Math.min(Math.max(index, 0), yearOptions.length - 1);
+                  yearListRef.current?.scrollToOffset({
+                    offset: boundedIndex * YEAR_ITEM_HEIGHT,
+                    animated: false,
+                  });
+                  setTimeout(() => {
+                    yearListRef.current?.scrollToIndex({ index: boundedIndex, animated: false });
+                  }, 40);
+                }}
                 showsVerticalScrollIndicator={false}
                 snapToInterval={YEAR_ITEM_HEIGHT}
-                decelerationRate="fast"
+                disableIntervalMomentum
+                decelerationRate="normal"
+                nestedScrollEnabled
+                overScrollMode="never"
+                scrollEventThrottle={16}
                 contentContainerStyle={styles.yearWheelContent}
-                onMomentumScrollEnd={(event) => syncPendingYearByOffset(event.nativeEvent.contentOffset.y)}
-                onScrollEndDrag={(event) => syncPendingYearByOffset(event.nativeEvent.contentOffset.y)}
+                onScroll={(event) => syncPendingYearByOffset(event.nativeEvent.contentOffset.y)}
+                onMomentumScrollEnd={(event) => snapYearByOffset(event.nativeEvent.contentOffset.y, false)}
+                onScrollEndDrag={(event) => {
+                  const velocityY = Math.abs(event.nativeEvent.velocity?.y || 0);
+                  if (velocityY < 0.08) {
+                    snapYearByOffset(event.nativeEvent.contentOffset.y, true);
+                  }
+                }}
                 renderItem={({ item }) => {
                   const active = item === pendingYear;
                   return (

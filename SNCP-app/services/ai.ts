@@ -1,9 +1,10 @@
-import { buildAuthHeaders, getApiBaseUrl } from '@/services/api';
 import type {
   AiNutritionResult,
   AiRecognitionResult,
+  AiRecipeDraftResult,
   AiRecommendationResult,
 } from '@/types/ai';
+import { buildAuthHeaders, getApiBaseUrl } from '@/services/api';
 
 async function buildApiError(resp: Response, fallbackMessage: string): Promise<never> {
   let message = fallbackMessage;
@@ -47,7 +48,7 @@ export async function recognizeFoods(
   if (!resp.ok) {
     await buildApiError(resp, '识别失败');
   }
-  return parseJsonResponse<AiRecognitionResult>(resp, '璇嗗埆澶辫触');
+  return parseJsonResponse<AiRecognitionResult>(resp, '识别失败');
 }
 
 export async function analyzeNutrition(token: string, items: Record<string, unknown>[]) {
@@ -62,7 +63,7 @@ export async function analyzeNutrition(token: string, items: Record<string, unkn
   if (!resp.ok) {
     await buildApiError(resp, '分析失败');
   }
-  return parseJsonResponse<AiNutritionResult>(resp, '鍒嗘瀽澶辫触');
+  return parseJsonResponse<AiNutritionResult>(resp, '分析失败');
 }
 
 export async function recommendRecipes(token: string, payload: Record<string, unknown>) {
@@ -77,5 +78,23 @@ export async function recommendRecipes(token: string, payload: Record<string, un
   if (!resp.ok) {
     await buildApiError(resp, '推荐失败');
   }
-  return parseJsonResponse<AiRecommendationResult>(resp, '鎺ㄨ崘澶辫触');
+  return parseJsonResponse<AiRecommendationResult>(resp, '推荐失败');
+}
+
+export async function extractRecipeDraft(
+  token: string,
+  payload: { image_base64?: string; image_url?: string; hint_text?: string }
+) {
+  const resp = await fetch(`${getApiBaseUrl()}/ai/recipe-draft`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...buildAuthHeaders(token),
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) {
+    await buildApiError(resp, '识别食谱资料失败');
+  }
+  return parseJsonResponse<AiRecipeDraftResult>(resp, '识别食谱资料失败');
 }

@@ -40,7 +40,10 @@ services:
         condition: service_healthy
     ports:
       - "4420:4420"
+    volumes:
+      - sncp_recipe_uploads:/app/backend/static/uploads
     restart: unless-stopped
 
 volumes:
   sncp_db_data:
+  sncp_recipe_uploads:

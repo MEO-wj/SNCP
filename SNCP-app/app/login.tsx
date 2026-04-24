@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,8 +17,8 @@ import { useRouter } from 'expo-router';
 import { AmbientBackground } from '@/components/ambient-background';
 import { colors } from '@/constants/palette';
 import { shadows } from '@/constants/shadows';
-import { getApiBaseUrl } from '@/services/api';
 import { setAuthToken } from '@/hooks/use-auth-token';
+import { getApiBaseUrl } from '@/services/api';
 import { setRefreshToken, setUserProfileRaw } from '@/storage/auth-storage';
 
 export default function LoginScreen() {
@@ -40,10 +39,6 @@ export default function LoginScreen() {
     setError('');
     setIsSubmitting(true);
 
-    console.log('[Login] 开始登录流程');
-    console.log('[Login] API URL:', `${apiBaseUrl}/auth/token`);
-    console.log('[Login] 手机号:', phone.trim());
-
     try {
       const resp = await fetch(`${apiBaseUrl}/auth/token`, {
         method: 'POST',
@@ -51,23 +46,16 @@ export default function LoginScreen() {
         body: JSON.stringify({ phone: phone.trim(), password }),
       });
 
-      console.log('[Login] 响应状态码:', resp.status);
-
-      const data = await resp.json();
-      console.log('[Login] 响应数据:', data);
+      const data = await resp.json().catch(() => null);
 
       if (!resp.ok) {
         setError(data?.error || '登录失败，请检查手机号或密码');
         return;
       }
 
-      console.log('[Login] 登录成功，存储令牌');
-
-      await setRefreshToken(data.refresh_token || null);
-      await setUserProfileRaw(JSON.stringify(data.user || {}));
-      await setAuthToken(data.access_token || null);
-
-      console.log('[Login] 跳转到主页面');
+      await setRefreshToken(data?.refresh_token || null);
+      await setUserProfileRaw(JSON.stringify(data?.user || {}));
+      await setAuthToken(data?.access_token || null);
 
       router.replace('/(tabs)');
     } catch (err) {
@@ -84,17 +72,19 @@ export default function LoginScreen() {
 
       <KeyboardAvoidingView
         behavior={Platform.select({ ios: 'padding', android: undefined })}
-        style={styles.flex}>
+        style={styles.flex}
+      >
         <ScrollView
           contentContainerStyle={styles.container}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled">
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={styles.brandBlock}>
             <View style={styles.logoBox}>
               <MaterialCommunityIcons name="silverware-fork-knife" size={28} color={colors.gold50} />
             </View>
             <Text style={styles.title}>
-              柠芯{'\n'}
+              柠芙{'\n'}
               <Text style={styles.titleAccent}>食伴</Text>
             </Text>
             <Text style={styles.subtitle}>记录饮食 · 守护营养</Text>
@@ -109,7 +99,7 @@ export default function LoginScreen() {
                   onChangeText={setPhone}
                   placeholder="请输入手机号"
                   placeholderTextColor={colors.stone500}
-                  keyboardType="phone-pad"
+                  keyboardType="default"
                   autoCapitalize="none"
                   style={styles.input}
                 />
@@ -130,11 +120,15 @@ export default function LoginScreen() {
               </View>
             </View>
 
-            <Pressable onPress={handleLogin} style={({ pressed }) => [
-              styles.loginButton,
-              isSubmitting && styles.loginButtonDisabled,
-              pressed && styles.loginButtonPressed,
-            ]} disabled={isSubmitting}>
+            <Pressable
+              onPress={handleLogin}
+              style={({ pressed }) => [
+                styles.loginButton,
+                isSubmitting && styles.loginButtonDisabled,
+                pressed && styles.loginButtonPressed,
+              ]}
+              disabled={isSubmitting}
+            >
               {isSubmitting ? (
                 <View style={styles.loadingRow}>
                   <ActivityIndicator size="small" color={colors.gold400} />

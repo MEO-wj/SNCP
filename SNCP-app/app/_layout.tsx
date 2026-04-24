@@ -35,6 +35,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (isLoading) return;
+    if (!segments.length) return;
 
     const first = segments[0];
     const inAuth = first === 'login' || first === 'register';

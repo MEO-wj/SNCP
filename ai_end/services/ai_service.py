@@ -115,6 +115,48 @@ class AIService:
             "message": "未配置食物识别服务。可设置 ZHIPU_API_KEY 启用图片识别，或先输入提示词做本地匹配。",
         }
 
+    def extract_recipe_draft(
+        self,
+        image_base64: str | None = None,
+        image_url: str | None = None,
+        hint_text: str | None = None,
+    ) -> dict[str, Any]:
+        if self.config.zhipu_api_key and (image_base64 or image_url):
+            try:
+                recipe = self._extract_recipe_draft_with_zhipu(
+                    image_base64=image_base64,
+                    image_url=image_url,
+                    hint_text=hint_text,
+                )
+                return {
+                    "recipe": recipe,
+                    "provider": "zhipu",
+                    "message": "已根据图片生成食谱草稿，请继续核对食材、步骤和标签。",
+                }
+            except Exception as exc:  # pragma: no cover
+                logger.warning("extract recipe draft with zhipu failed: %s", exc)
+
+        if self.config.openai_api_key and (image_base64 or image_url):
+            try:
+                recipe = self._extract_recipe_draft_with_openai(
+                    image_base64=image_base64,
+                    image_url=image_url,
+                    hint_text=hint_text,
+                )
+                return {
+                    "recipe": recipe,
+                    "provider": "openai",
+                    "message": "已根据图片生成食谱草稿，请继续核对食材、步骤和标签。",
+                }
+            except Exception as exc:  # pragma: no cover
+                logger.warning("extract recipe draft with openai failed: %s", exc)
+
+        return {
+            "recipe": self._build_empty_recipe_draft(hint_text=hint_text),
+            "provider": "local",
+            "message": "暂时无法调用识图模型，已保留图片，可继续手动完善食谱资料。",
+        }
+
     def analyze_nutrition(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self.config.ai_nutrition_analysis_url:
             headers = {"Content-Type": "application/json"}
@@ -333,11 +375,16 @@ class AIService:
             and not self._is_recipe_blocked_by_constraints(recipe, payload)
         ]
         library_candidates = self._apply_recommendation_refresh(library_candidates, payload)
-        by_name = {
-            self._normalize_recipe_name(recipe.get("name")): recipe
-            for recipe in library_candidates
-            if self._normalize_recipe_name(recipe.get("name"))
-        }
+        by_name: dict[str, dict[str, Any]] = {}
+        for recipe in library_candidates:
+            normalized_name = self._normalize_recipe_name(recipe.get("name"))
+            if not normalized_name:
+                continue
+            existing_recipe = by_name.get(normalized_name)
+            if existing_recipe is None or (
+                recipe.get("library_scope") == "local" and existing_recipe.get("library_scope") != "local"
+            ):
+                by_name[normalized_name] = recipe
         by_id = {str(recipe.get("id")): recipe for recipe in library_candidates if recipe.get("id") is not None}
         selected: list[dict[str, Any]] = []
         seen_names: set[str] = set()
@@ -364,7 +411,8 @@ class AIService:
                     "cover_url": recipe.get("cover_url") or "",
                     "source_url": recipe.get("source_url") or "",
                     "source_provider": recipe.get("source_provider") or "",
-                    "summary": item.get("summary") or recipe.get("summary") or "来自服务器食谱库的推荐。",
+                    "library_scope": recipe.get("library_scope") or "server",
+                    "summary": recipe.get("summary") or self._build_recipe_summary(recipe),
                     "reason": item.get("reason") or "该食谱来自服务器食谱库，可结合当前健康档案作为候选。",
                     "source": "library",
                 }
@@ -388,7 +436,8 @@ class AIService:
                 "cover_url": recipe.get("cover_url") or "",
                 "source_url": recipe.get("source_url") or "",
                 "source_provider": recipe.get("source_provider") or "",
-                "summary": recipe.get("summary") or "来自服务器食谱库的推荐。",
+                "library_scope": recipe.get("library_scope") or "server",
+                "summary": recipe.get("summary") or self._build_recipe_summary(recipe),
                 "reason": "该食谱来自服务器食谱库，可结合当前健康档案作为候选。",
                 "source": "library",
             }
@@ -427,7 +476,7 @@ class AIService:
             item = raw_item if isinstance(raw_item, dict) else {"name": str(raw_item), "amount": ""}
             candidate = candidate_items[index] if index < len(candidate_items) and isinstance(candidate_items[index], dict) else {}
             name = cls._safe_chinese_text(item.get("name"), candidate.get("name"), f"食材{index + 1}")
-            amount = cls._safe_chinese_text(item.get("amount"), candidate.get("amount"), "")
+            amount = cls._safe_amount_text(item.get("amount"), candidate.get("amount"))
             result.append({"name": name, "amount": amount})
         if result:
             return result
@@ -435,9 +484,16 @@ class AIService:
             if not isinstance(raw_candidate, dict):
                 continue
             name = cls._safe_chinese_text(raw_candidate.get("name"), None, f"食材{index + 1}")
-            amount = cls._safe_chinese_text(raw_candidate.get("amount"), None, "")
+            amount = cls._safe_amount_text(raw_candidate.get("amount"), None)
             result.append({"name": name, "amount": amount})
         return result
+
+    @staticmethod
+    def _safe_amount_text(value: Any, candidate_value: Any) -> str:
+        text = str(value or "").strip()
+        if text:
+            return text
+        return str(candidate_value or "").strip()
 
     @classmethod
     def _safe_chinese_steps(cls, value: Any, candidate_value: Any) -> list[str]:
@@ -454,6 +510,195 @@ class AIService:
         if cleaned_candidates:
             return cleaned_candidates
         return ["准备主要食材并清洗切配。", "少油加热后加入食材烹调。", "出锅前少量调味，优先控制盐和油。"]
+
+    @staticmethod
+    def _build_recipe_summary(recipe: dict[str, Any]) -> str:
+        steps = recipe.get("steps") or []
+        if isinstance(steps, list):
+            for step in steps:
+                text = str(step or "").strip()
+                if text:
+                    return text
+
+        tags = [str(item).strip() for item in (recipe.get("tags") or []) if str(item).strip()]
+        name = str(recipe.get("name") or "这道食谱").strip()
+        if tags:
+            return f"{name}主打{tags[:2][0] if len(tags) == 1 else '、'.join(tags[:2])}，适合作为日常餐食。"
+        return f"{name}适合作为日常餐食，可按个人口味继续调整。"
+
+    def _extract_recipe_draft_with_zhipu(
+        self,
+        *,
+        image_base64: str | None,
+        image_url: str | None,
+        hint_text: str | None,
+    ) -> dict[str, Any]:
+        data_url = image_url or self._build_image_data_url(image_base64)
+        if not data_url:
+            return self._build_empty_recipe_draft(hint_text=hint_text)
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是中文食谱整理助手。请根据食物图片识别菜品，并输出结构化食谱草稿。"
+                    "如果图片信息不完整，可以给出合理且保守的估计，但不要编造过细的营养数据。"
+                    "请严格返回 JSON 对象，不要输出解释。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": self._build_recipe_draft_prompt(hint_text)},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            },
+        ]
+        data = self._zhipu_chat_completion(
+            messages,
+            model=self.config.zhipu_vision_model,
+            max_tokens=1400,
+            response_format_type="json_object",
+        )
+        return self._normalize_recipe_draft(data, hint_text=hint_text)
+
+    def _extract_recipe_draft_with_openai(
+        self,
+        *,
+        image_base64: str | None,
+        image_url: str | None,
+        hint_text: str | None,
+    ) -> dict[str, Any]:
+        data_url = image_url or self._build_image_data_url(image_base64)
+        if not data_url:
+            return self._build_empty_recipe_draft(hint_text=hint_text)
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是中文食谱整理助手。请根据食物图片识别菜品，并输出结构化食谱草稿。"
+                    "如果图片信息不完整，可以给出合理且保守的估计，但不要编造过细的营养数据。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": self._build_recipe_draft_prompt(hint_text)},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            },
+        ]
+        result = self._chat_completion(
+            messages,
+            schema=self._recipe_draft_schema(),
+            max_tokens=1400,
+        )
+        return self._normalize_recipe_draft(result, hint_text=hint_text)
+
+    @staticmethod
+    def _build_recipe_draft_prompt(hint_text: str | None) -> str:
+        hint = str(hint_text or "").strip()
+        return (
+            "请识别这张菜品或食谱图片，生成适合管理员继续编辑的食谱草稿。\n"
+            "请返回 JSON 对象，字段包括：\n"
+            "name: 食谱名称\n"
+            "cuisine: 菜系或分类，如家常、轻食、早餐\n"
+            "summary: 一段简短中文简介\n"
+            "tags: 标签数组\n"
+            "suitable_for: 适宜人群数组\n"
+            "ingredients: 食材数组，每项包含 name 和 amount\n"
+            "steps: 步骤数组\n"
+            "source_provider: 固定填“AI识图生成”或相近中文\n"
+            "如果有把握不足，请返回保守且可编辑的草稿，不要留英文。"
+            + (f"\n用户补充提示：{hint}" if hint else "")
+        )
+
+    @staticmethod
+    def _recipe_draft_schema() -> dict[str, Any]:
+        return {
+            "name": "recipe_draft",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "cuisine": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "tags": {"type": "array", "items": {"type": "string"}},
+                    "suitable_for": {"type": "array", "items": {"type": "string"}},
+                    "ingredients": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "amount": {"type": "string"},
+                            },
+                            "required": ["name", "amount"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "steps": {"type": "array", "items": {"type": "string"}},
+                    "source_provider": {"type": "string"},
+                },
+                "required": [
+                    "name",
+                    "cuisine",
+                    "summary",
+                    "tags",
+                    "suitable_for",
+                    "ingredients",
+                    "steps",
+                    "source_provider",
+                ],
+                "additionalProperties": False,
+            },
+        }
+
+    def _normalize_recipe_draft(self, data: dict[str, Any], *, hint_text: str | None) -> dict[str, Any]:
+        fallback = self._build_empty_recipe_draft(hint_text=hint_text)
+        name = self._safe_chinese_text(data.get("name"), fallback.get("name"), "未命名食谱")
+        cuisine = self._safe_chinese_text(data.get("cuisine"), fallback.get("cuisine"), "家常")
+        summary = self._safe_chinese_text(
+            data.get("summary"),
+            fallback.get("summary"),
+            "这是一道可继续完善的食谱草稿，请结合实际食材和做法补充细节。",
+        )
+        tags = self._safe_chinese_list(data.get("tags"), fallback.get("tags"))
+        suitable_for = self._safe_chinese_list(data.get("suitable_for"), fallback.get("suitable_for"))
+        ingredients = self._safe_chinese_ingredients(data.get("ingredients"), fallback.get("ingredients"))
+        steps = self._safe_chinese_steps(data.get("steps"), fallback.get("steps"))
+        source_provider = self._safe_chinese_text(
+            data.get("source_provider"),
+            fallback.get("source_provider"),
+            "AI识图生成",
+        )
+        return {
+            "name": name,
+            "cuisine": cuisine,
+            "summary": summary,
+            "tags": tags,
+            "suitable_for": suitable_for,
+            "ingredients": ingredients,
+            "steps": steps,
+            "source_provider": source_provider,
+        }
+
+    @staticmethod
+    def _build_empty_recipe_draft(hint_text: str | None = None) -> dict[str, Any]:
+        hint = str(hint_text or "").strip()
+        name = hint[:20] if hint else "未命名食谱"
+        return {
+            "name": name,
+            "cuisine": "家常",
+            "summary": "可先根据图片生成草稿，再由管理员补充食材、步骤和标签。",
+            "tags": [],
+            "suitable_for": [],
+            "ingredients": [],
+            "steps": [],
+            "source_provider": "AI识图生成",
+        }
 
     def _recognize_with_zhipu(
         self,
@@ -760,10 +1005,17 @@ class AIService:
 
             score = 0
             reasons: list[str] = []
+            library_scope = str(recipe.get("library_scope") or "server").strip().lower()
 
             if keyword and (keyword in name_lower or any(keyword in tag for tag in tags_lower)):
                 score += 3
                 reasons.append("和当前搜索意图相关")
+            if library_scope == "local":
+                score += 4
+                reasons.append("优先命中你的本地食谱库")
+            elif library_scope == "server":
+                score += 1
+                reasons.append("可从服务器食谱库补充选择")
             if health_tags.intersection(suitable_for):
                 score += 4
                 reasons.append("适合当前健康档案")
@@ -794,7 +1046,8 @@ class AIService:
                     "cover_url": recipe.get("cover_url") or "",
                     "source_url": recipe.get("source_url") or "",
                     "source_provider": recipe.get("source_provider") or "",
-                    "summary": "、".join(reasons[:2]),
+                    "library_scope": library_scope,
+                    "summary": recipe.get("summary") or self._build_recipe_summary(recipe),
                     "reason": "；".join(reasons[:3]),
                     "source": recipe.get("source") or "library",
                     "_score": score,
@@ -802,8 +1055,17 @@ class AIService:
             )
 
         ranked.sort(key=lambda item: (item["_score"], item["name"]), reverse=True)
+        deduped_ranked: list[dict[str, Any]] = []
+        seen_names: set[str] = set()
+        for item in ranked:
+            normalized_name = self._normalize_recipe_name(item.get("name"))
+            if not normalized_name or normalized_name in seen_names:
+                continue
+            seen_names.add(normalized_name)
+            deduped_ranked.append(item)
+
         top = self._apply_recommendation_refresh(
-            [self._strip_private_fields(item) for item in ranked if item["_score"] >= -1],
+            [self._strip_private_fields(item) for item in deduped_ranked if item["_score"] >= -1],
             payload,
         )[:4]
         if top:
@@ -856,12 +1118,22 @@ class AIService:
         lookup: dict[str, dict[str, Any]] = {}
         for recipe in payload.get("recipes") or []:
             normalized_name = self._normalize_recipe_name(recipe.get("name"))
-            if normalized_name:
+            if not normalized_name:
+                continue
+            existing_recipe = lookup.get(normalized_name)
+            if existing_recipe is None or (
+                recipe.get("library_scope") == "local" and existing_recipe.get("library_scope") != "local"
+            ):
                 lookup[normalized_name] = recipe
         for recipe in rule_candidates:
             normalized_name = self._normalize_recipe_name(recipe.get("name"))
-            if normalized_name:
-                lookup[normalized_name] = {**lookup.get(normalized_name, {}), **recipe}
+            if not normalized_name:
+                continue
+            existing_recipe = lookup.get(normalized_name, {})
+            if existing_recipe.get("library_scope") == "local" and recipe.get("library_scope") != "local":
+                lookup[normalized_name] = {**recipe, **existing_recipe}
+            else:
+                lookup[normalized_name] = {**existing_recipe, **recipe}
         return lookup
 
     def _ensure_recommendation_source_mix(
@@ -914,13 +1186,29 @@ class AIService:
         return sorted(refreshed, key=lambda item: bool(item.get("cover_url")), reverse=True)
 
     @staticmethod
-    def _enrich_external_recommendation_item(recipe: dict[str, Any]) -> dict[str, Any]:
+    def _is_hint_summary_text(summary: str) -> bool:
+        normalized = str(summary or "").strip()
+        if not normalized:
+            return True
+        hint_keywords = (
+            "服务器食谱库",
+            "本地食谱库",
+            "外部食谱候选",
+            "候选",
+            "命中",
+            "搜索意图",
+            "口味偏好",
+            "健康档案",
+        )
+        return any(keyword in normalized for keyword in hint_keywords)
+
+    def _enrich_external_recommendation_item(self, recipe: dict[str, Any]) -> dict[str, Any]:
         item = dict(recipe)
         item["source"] = "external"
         if not item.get("reason"):
-            item["reason"] = "来自外部食谱候选，提供新的搭配思路和配图，可在确认食材适合后尝试。"
-        if not item.get("summary"):
-            item["summary"] = "外部食谱候选，可作为本地菜谱之外的新选择。"
+            item["reason"] = "来自外部候选食谱，可结合本地饮食习惯判断是否采纳。"
+        if self._is_hint_summary_text(str(item.get("summary") or "")):
+            item["summary"] = self._build_recipe_summary(item)
         return item
 
     def _is_recipe_blocked_by_constraints(self, recipe: dict[str, Any], payload: dict[str, Any]) -> bool:
@@ -1126,7 +1414,10 @@ class AIService:
     def _build_image_data_url(image_base64: str | None) -> str | None:
         if not image_base64:
             return None
-        return f"data:image/jpeg;base64,{image_base64}"
+        image_payload = image_base64.strip()
+        if image_payload.startswith("data:"):
+            return image_payload
+        return f"data:image/jpeg;base64,{image_payload}"
 
     @staticmethod
     def _normalize_recipe_name(value: Any) -> str:

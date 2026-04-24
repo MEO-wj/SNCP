@@ -33,6 +33,22 @@ class UserRepository:
             password_cost=row["password_cost"],
         )
 
+    def get_by_phone(self, phone: str) -> User:
+        with db_session() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, phone, display_name, password_hash, password_algo, password_cost,
+                       roles, avatar_data, created_at, updated_at, last_login_at
+                FROM users
+                WHERE phone = %s
+                """,
+                (phone,),
+            )
+            row = cur.fetchone()
+        if not row:
+            raise NotFoundError("user not found")
+        return self._row_to_user(row)
+
     def get_by_id(self, user_id: UUID) -> User:
         with db_session() as conn, conn.cursor() as cur:
             cur.execute(

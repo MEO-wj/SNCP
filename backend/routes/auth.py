@@ -1,4 +1,4 @@
-"""认证路由：手机号注册与JWT登录刷新。"""
+"""认证路由：注册、登录、刷新和个人资料。"""
 
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ from uuid import UUID
 
 from flask import Blueprint, jsonify, request
 
+from backend.config import Config
 from backend.repository.user_repository import NotFoundError, UserRepository
 from backend.services.auth_service import AuthMetadata, AuthService
 from backend.services.exceptions import InvalidCredentialsError, UnauthorizedError, ValidationError
-from backend.config import Config
 
 bp = Blueprint("auth", __name__)
 
@@ -23,10 +23,10 @@ auth_service = AuthService(config, user_repo, logger=logger)
 
 def _user_payload(user, include_avatar: bool = False) -> dict[str, Any]:
     payload = {
-        "id": str(user.id),
-        "phone": user.phone,
-        "display_name": user.display_name,
-        "roles": user.roles,
+      "id": str(user.id),
+      "phone": user.phone,
+      "display_name": user.display_name,
+      "roles": user.roles,
     }
     if include_avatar:
         payload["avatar_url"] = user.avatar_data
@@ -80,9 +80,9 @@ def admin_required(func: Callable[..., Any]):
 
 @bp.route("/token", methods=["POST"])
 def login():
-    data = request.get_json(silent=True) or {}
-    phone = data.get("phone") or ""
-    password = data.get("password") or ""
+    data = request.get_json(force=True, silent=True) or {}
+    phone = str(data.get("phone") or data.get("account") or data.get("username") or "").strip()
+    password = str(data.get("password") or "")
 
     try:
         result = auth_service.login(phone, password, _get_auth_metadata())
@@ -90,7 +90,7 @@ def login():
         return jsonify({"error": str(exc)}), 400
     except InvalidCredentialsError:
         return jsonify({"error": "手机号或密码错误"}), 401
-    except Exception as exc:  # pragma: no cover - 防止泄漏内部信息
+    except Exception as exc:  # pragma: no cover
         logger.exception("login failed")
         return jsonify({"error": f"登录失败: {exc}"}), 500
 
@@ -107,9 +107,9 @@ def login():
 
 @bp.route("/register", methods=["POST"])
 def register():
-    data = request.get_json(silent=True) or {}
-    phone = data.get("phone") or ""
-    password = data.get("password") or ""
+    data = request.get_json(force=True, silent=True) or {}
+    phone = str(data.get("phone") or "").strip()
+    password = str(data.get("password") or "")
     display_name = data.get("display_name") or None
 
     try:
@@ -134,8 +134,8 @@ def register():
 
 @bp.route("/token/refresh", methods=["POST"])
 def refresh():
-    data = request.get_json(silent=True) or {}
-    token = data.get("refresh_token") or ""
+    data = request.get_json(force=True, silent=True) or {}
+    token = str(data.get("refresh_token") or "")
     try:
         result = auth_service.refresh(token, _get_auth_metadata())
     except ValidationError as exc:
@@ -159,8 +159,8 @@ def refresh():
 
 @bp.route("/logout", methods=["POST"])
 def logout():
-    data = request.get_json(silent=True) or {}
-    token = data.get("refresh_token") or ""
+    data = request.get_json(force=True, silent=True) or {}
+    token = str(data.get("refresh_token") or "")
     try:
         auth_service.logout(token)
     except ValidationError as exc:
@@ -191,7 +191,7 @@ def get_me():
                 "display_name": user.display_name,
                 "phone": user.phone,
                 "roles": user.roles,
-                    "avatar_url": user.avatar_data,
+                "avatar_url": user.avatar_data,
             }
         ),
         200,
@@ -206,7 +206,7 @@ def update_me():
     if not user_id:
         return jsonify({"error": "未授权访问"}), 401
 
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(force=True, silent=True) or {}
     display_name = data.get("display_name")
     avatar_image = data.get("avatar_image")
 
@@ -220,11 +220,4 @@ def update_me():
         logger.exception("update me failed")
         return jsonify({"error": f"更新失败: {exc}"}), 500
 
-    return (
-        jsonify(
-            {
-                "user": _user_payload(user, include_avatar=True)
-            }
-        ),
-        200,
-    )
+    return jsonify({"user": _user_payload(user, include_avatar=True)}), 200

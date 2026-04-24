@@ -11,6 +11,7 @@ DEFAULT_VERSION = 0
 DASHBOARD_TTL_SECONDS = 60 * 60 * 6
 RECOMMEND_TTL_SECONDS = 60 * 60 * 6
 RECOMMEND_STRATEGY_VERSION = "library-only-rules-v2"
+GLOBAL_RECIPE_LIBRARY_VERSION_KEY = "nutrition:recipe-library:global-version"
 
 
 def get_user_state_version(user_id: UUID | str) -> int:
@@ -32,6 +33,29 @@ def bump_user_state_version(user_id: UUID | str) -> int:
 
     try:
         return int(client.incr(_state_version_key(user_id)))
+    except Exception:
+        return DEFAULT_VERSION + 1
+
+
+def get_global_recipe_library_version() -> int:
+    client = _get_redis_client()
+    if client is None:
+        return DEFAULT_VERSION
+
+    try:
+        value = client.get(GLOBAL_RECIPE_LIBRARY_VERSION_KEY)
+        return int(value) if value is not None else DEFAULT_VERSION
+    except Exception:
+        return DEFAULT_VERSION
+
+
+def bump_global_recipe_library_version() -> int:
+    client = _get_redis_client()
+    if client is None:
+        return DEFAULT_VERSION + 1
+
+    try:
+        return int(client.incr(GLOBAL_RECIPE_LIBRARY_VERSION_KEY))
     except Exception:
         return DEFAULT_VERSION + 1
 

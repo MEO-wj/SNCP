@@ -46,6 +46,7 @@ export type AiNutritionResult = {
 export type AiRecommendationItem = {
   recipe_id?: number | null;
   name: string;
+  library_scope?: 'local' | 'server';
   cuisine?: string | null;
   summary?: string;
   reason?: string;
@@ -63,6 +64,25 @@ export type AiRecommendationItem = {
 export type AiRecommendationResult = {
   items: AiRecommendationItem[];
   recipes?: Recipe[];
+  local_recipes?: Recipe[];
+  server_recipes?: Recipe[];
+  provider: string;
+  message?: string;
+};
+
+export type AiRecipeDraft = {
+  name?: string;
+  cuisine?: string | null;
+  summary?: string;
+  tags?: string[];
+  suitable_for?: string[];
+  ingredients?: { name: string; amount?: string }[];
+  steps?: string[];
+  source_provider?: string | null;
+};
+
+export type AiRecipeDraftResult = {
+  recipe: AiRecipeDraft;
   provider: string;
   message?: string;
 };

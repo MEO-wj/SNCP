@@ -1,3 +1,4 @@
+import { getApiBaseUrl } from '@/services/api';
 import type { AiRecommendationItem } from '@/types/ai';
 import type { Recipe } from '@/types/recipe';
 
@@ -9,6 +10,7 @@ type RecipeIngredient = {
 export type RecipePost = {
   id: string;
   source: 'demo' | 'library' | 'ai' | 'external';
+  libraryScope?: 'local' | 'server';
   name: string;
   cuisine: string;
   tags: string[];
@@ -22,7 +24,10 @@ export type RecipePost = {
   coverIndex: number;
 };
 
-const DEMO_RECIPE_BASE: Omit<RecipePost, 'id' | 'source' | 'coverIndex' | 'sourceUrl' | 'sourceProvider'>[] = [
+const DEMO_RECIPE_BASE: Omit<
+  RecipePost,
+  'id' | 'source' | 'coverIndex' | 'sourceUrl' | 'sourceProvider'
+>[] = [
   {
     name: '山药小米南瓜粥',
     cuisine: '家常',
@@ -49,7 +54,7 @@ const DEMO_RECIPE_BASE: Omit<RecipePost, 'id' | 'source' | 'coverIndex' | 'sourc
     cuisine: '家常',
     tags: ['家常菜', '快手', '高蛋白'],
     suitableFor: ['普通家庭', '食欲欠佳', '均衡饮食'],
-    summary: '经典家常菜，做法简单，适合日常稳定复用。',
+    summary: '经典家常菜，做法简单，适合日常高频复用。',
     ingredients: [
       { name: '番茄', amount: '2 个' },
       { name: '鸡蛋', amount: '2 个' },
@@ -133,7 +138,7 @@ const DEMO_RECIPE_BASE: Omit<RecipePost, 'id' | 'source' | 'coverIndex' | 'sourc
     cuisine: '家常',
     tags: ['高纤维', '少油', '家常菜'],
     suitableFor: ['控脂饮食', '便秘困扰', '家常搭配'],
-    summary: '食材便宜、做法熟悉，适合项目里的高频预置菜。',
+    summary: '食材便宜、做法熟悉，适合作为高频预置菜。',
     ingredients: [
       { name: '芹菜', amount: '180g' },
       { name: '香干', amount: '120g' },
@@ -197,6 +202,37 @@ function normalizeText(value: string | undefined | null): string {
   return (value || '').trim();
 }
 
+function getApiOrigin() {
+  return getApiBaseUrl().replace(/\/api\/?$/, '');
+}
+
+function normalizeCoverUrlForDisplay(value: string | undefined | null): string {
+  const coverUrl = normalizeText(value);
+  if (!coverUrl) {
+    return '';
+  }
+  if (coverUrl.startsWith('/static/')) {
+    return `${getApiOrigin()}${coverUrl}`;
+  }
+
+  try {
+    const parsedCoverUrl = new URL(coverUrl);
+    const apiUrl = new URL(getApiBaseUrl());
+    const isLocalStaticCover =
+      parsedCoverUrl.pathname.startsWith('/static/uploads/') &&
+      ['localhost', '127.0.0.1', '10.0.2.2'].includes(parsedCoverUrl.hostname);
+    if (isLocalStaticCover) {
+      parsedCoverUrl.protocol = apiUrl.protocol;
+      parsedCoverUrl.host = apiUrl.host;
+      return parsedCoverUrl.toString();
+    }
+  } catch {
+    return coverUrl;
+  }
+
+  return coverUrl;
+}
+
 function normalizeTags(tags: string[] | undefined): string[] {
   return (tags || []).map((tag) => normalizeText(tag)).filter(Boolean);
 }
@@ -237,6 +273,23 @@ function buildSummary(name: string, tags: string[], steps: string[]): string {
     return `${name}主打${tags.slice(0, 2).join('、')}，适合作为日常健康餐。`;
   }
   return `${name}适合作为日常家常餐，营养均衡且容易上手。`;
+}
+
+function isRecommendationHintText(value: string): boolean {
+  return [
+    '服务器食谱库',
+    '本地食谱库',
+    '搜索意图',
+    '健康档案',
+    '口味偏好',
+    '候选',
+    '命中',
+  ].some((keyword) => value.includes(keyword));
+}
+
+function normalizeRecipeSummary(value: string | undefined | null): string {
+  const summary = normalizeText(value);
+  return summary && !isRecommendationHintText(summary) ? summary : '';
 }
 
 function normalizeNameForCompare(name: string): string {
@@ -317,6 +370,7 @@ export function mapLibraryRecipesToPosts(recipes: Recipe[]): RecipePost[] {
     return {
       id: `library-${recipe.id}`,
       source: 'library',
+      libraryScope: recipe.library_scope || 'server',
       name,
       cuisine,
       tags,
@@ -324,7 +378,7 @@ export function mapLibraryRecipesToPosts(recipes: Recipe[]): RecipePost[] {
       summary: buildSummary(name, tags, steps),
       ingredients,
       steps,
-      coverUrl: normalizeText(recipe.cover_url) || matchedDemoRecipe?.coverUrl,
+      coverUrl: normalizeCoverUrlForDisplay(recipe.cover_url) || matchedDemoRecipe?.coverUrl,
       sourceUrl: normalizeText(recipe.source_url) || undefined,
       sourceProvider: normalizeText(recipe.source_provider) || undefined,
       coverIndex: Math.abs(Number(recipe.id) || index),
@@ -370,9 +424,14 @@ export function buildRecommendationPosts(
   recommendations: AiRecommendationItem[],
   libraryPosts: RecipePost[],
 ): RecipePost[] {
-  const libraryByName = new Map(
-    libraryPosts.map((post) => [normalizeNameForCompare(post.name), post] as const),
-  );
+  const libraryByName = new Map<string, RecipePost>();
+  libraryPosts.forEach((post) => {
+    const key = normalizeNameForCompare(post.name);
+    const existingPost = libraryByName.get(key);
+    if (!existingPost || (post.libraryScope === 'local' && existingPost.libraryScope !== 'local')) {
+      libraryByName.set(key, post);
+    }
+  });
 
   return recommendations.map((item, index) => {
     const name = normalizeText(item.name) || `AI 推荐食谱 ${index + 1}`;
@@ -382,7 +441,7 @@ export function buildRecommendationPosts(
     const suitableFor = normalizeTags(item.suitable_for);
     const ingredients = normalizeRecommendationIngredients(item.ingredients);
     const steps = normalizeRecommendationSteps(item.steps);
-    const coverUrl = normalizeText(item.cover_url) || undefined;
+    const coverUrl = normalizeCoverUrlForDisplay(item.cover_url) || undefined;
     const sourceUrl = normalizeText(item.source_url) || undefined;
     const sourceProvider = normalizeText(item.source_provider) || undefined;
     const matchedLibraryPost = libraryByName.get(normalizedName);
@@ -393,9 +452,14 @@ export function buildRecommendationPosts(
           findRelatedDemoRecipe(name, normalizeText(item.cuisine), tags, suitableFor);
 
     if (matchedLibraryPost && source !== 'external') {
+      const nextLibraryScope =
+        matchedLibraryPost.libraryScope === 'local'
+          ? 'local'
+          : item.library_scope || matchedLibraryPost.libraryScope;
       return {
         ...matchedLibraryPost,
-        summary: normalizeText(item.summary) || matchedLibraryPost.summary,
+        libraryScope: nextLibraryScope,
+        summary: matchedLibraryPost.summary || normalizeRecipeSummary(item.summary),
         tags: tags.length > 0 ? tags : matchedLibraryPost.tags,
         suitableFor: suitableFor.length > 0 ? suitableFor : matchedLibraryPost.suitableFor,
         ingredients: ingredients.length > 0 ? ingredients : matchedLibraryPost.ingredients,
@@ -407,7 +471,7 @@ export function buildRecommendationPosts(
     }
 
     const reason = normalizeText(item.reason);
-    const summary = normalizeText(item.summary) || reason || buildSummary(name, tags, steps);
+    const summary = normalizeRecipeSummary(item.summary) || buildSummary(name, tags, steps);
     const nextIngredients = ingredients.length > 0 ? ingredients : matchedDemoRecipe?.ingredients || [];
     const nextSteps =
       steps.length > 0
@@ -422,6 +486,7 @@ export function buildRecommendationPosts(
           ? `library-${item.recipe_id}`
           : `${source}-${normalizedName || index + 1}`,
       source,
+      libraryScope: item.library_scope,
       name,
       cuisine: normalizeText(item.cuisine) || matchedDemoRecipe?.cuisine || 'AI 推荐',
       tags: tags.length > 0 ? tags : matchedDemoRecipe?.tags || [],
@@ -461,5 +526,5 @@ export function getRecipeCover(recipe: Pick<RecipePost, 'coverUrl'>): { uri: str
   if (!hasRecipeCover(recipe)) {
     return null;
   }
-  return { uri: recipe.coverUrl!.trim() };
+  return { uri: normalizeCoverUrlForDisplay(recipe.coverUrl) };
 }
