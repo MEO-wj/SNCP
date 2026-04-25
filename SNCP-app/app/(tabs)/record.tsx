@@ -233,8 +233,6 @@ export default function RecordScreen() {
   const [deleteErrorText, setDeleteErrorText] = useState('');
   const [deletingMealId, setDeletingMealId] = useState<number | null>(null);
 
-  const todayKey = useMemo(() => getTodayKey(), []);
-
   const visibleFoods = useMemo(
     () => FOOD_CATALOG.filter((item) => item.category === selectedCategory),
     [selectedCategory],
@@ -278,6 +276,7 @@ export default function RecordScreen() {
       return [] as Meal[];
     }
     try {
+      const todayKey = getTodayKey();
       const res = await fetchMealsByDate(todayKey, token);
       const nextMeals = res.meals || [];
       setMeals(nextMeals);
@@ -288,7 +287,7 @@ export default function RecordScreen() {
       setErrorText(error instanceof Error ? error.message : '获取餐次失败，请检查后端服务。');
       return [] as Meal[];
     }
-  }, [todayKey, token]);
+  }, [token]);
 
   useFocusEffect(
     useCallback(() => {

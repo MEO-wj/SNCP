@@ -96,16 +96,16 @@ class MealRepository:
 
         return deleted is not None
 
-    def list_meals_by_date(self, user_id: UUID, day: date) -> list[dict[str, Any]]:
+    def list_meals_by_date(self, user_id: UUID, start_utc: datetime, end_utc: datetime) -> list[dict[str, Any]]:
         with db_session() as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT id, meal_type, eaten_at, client_request_id, note, created_at
                 FROM meals
-                WHERE user_id = %s AND eaten_at::date = %s
+                WHERE user_id = %s AND eaten_at >= %s AND eaten_at < %s
                 ORDER BY eaten_at DESC, id DESC
                 """,
-                (user_id, day),
+                (user_id, start_utc, end_utc),
             )
             meals = cur.fetchall()
             if not meals:
@@ -129,16 +129,16 @@ class MealRepository:
 
         return [{**meal, "items": items_by_meal.get(meal["id"], [])} for meal in meals]
 
-    def list_meals_by_range(self, user_id: UUID, start: date, end: date) -> list[dict[str, Any]]:
+    def list_meals_by_range(self, user_id: UUID, start_utc: datetime, end_utc: datetime) -> list[dict[str, Any]]:
         with db_session() as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT id, meal_type, eaten_at, client_request_id, note, created_at
                 FROM meals
-                WHERE user_id = %s AND eaten_at::date BETWEEN %s AND %s
+                WHERE user_id = %s AND eaten_at >= %s AND eaten_at < %s
                 ORDER BY eaten_at DESC, id DESC
                 """,
-                (user_id, start, end),
+                (user_id, start_utc, end_utc),
             )
             meals = cur.fetchall()
             if not meals:
@@ -162,7 +162,7 @@ class MealRepository:
 
         return [{**meal, "items": items_by_meal.get(meal["id"], [])} for meal in meals]
 
-    def get_meal_items_by_range(self, user_id: UUID, start: date, end: date) -> list[dict[str, Any]]:
+    def get_meal_items_by_range(self, user_id: UUID, start_utc: datetime, end_utc: datetime) -> list[dict[str, Any]]:
         with db_session() as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -170,10 +170,10 @@ class MealRepository:
                        m.eaten_at
                 FROM meal_items mi
                 JOIN meals m ON mi.meal_id = m.id
-                WHERE m.user_id = %s AND m.eaten_at::date BETWEEN %s AND %s
+                WHERE m.user_id = %s AND m.eaten_at >= %s AND m.eaten_at < %s
                 ORDER BY m.eaten_at DESC, mi.id ASC
                 """,
-                (user_id, start, end),
+                (user_id, start_utc, end_utc),
             )
             return cur.fetchall()
 

@@ -413,8 +413,9 @@ export default function ProfileDetailScreen() {
         animationType="fade"
         onRequestClose={() => setYearPickerVisible(false)}
       >
-        <Pressable style={styles.modalMask} onPress={() => setYearPickerVisible(false)}>
-          <Pressable style={styles.yearModalCard} onPress={() => {}}>
+        <View style={styles.modalMask}>
+          <Pressable style={styles.modalDismissLayer} onPress={() => setYearPickerVisible(false)} />
+          <View style={styles.yearModalCard}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>选择出生年份</Text>
               <Pressable onPress={() => setYearPickerVisible(false)}>
@@ -446,8 +447,9 @@ export default function ProfileDetailScreen() {
                 snapToInterval={YEAR_ITEM_HEIGHT}
                 disableIntervalMomentum
                 decelerationRate="normal"
-                nestedScrollEnabled
+                nestedScrollEnabled={false}
                 overScrollMode="never"
+                scrollEnabled
                 scrollEventThrottle={16}
                 contentContainerStyle={styles.yearWheelContent}
                 onScroll={(event) => syncPendingYearByOffset(event.nativeEvent.contentOffset.y)}
@@ -498,8 +500,8 @@ export default function ProfileDetailScreen() {
                 <Text style={[styles.modalActionButtonText, styles.modalActionButtonTextPrimary]}>确认</Text>
               </Pressable>
             </View>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
 
       <Modal
@@ -508,8 +510,9 @@ export default function ProfileDetailScreen() {
         animationType="fade"
         onRequestClose={() => setChronicPickerVisible(false)}
       >
-        <Pressable style={styles.modalMask} onPress={() => setChronicPickerVisible(false)}>
-          <Pressable style={styles.chronicModalCard} onPress={() => {}}>
+        <View style={styles.modalMask}>
+          <Pressable style={styles.modalDismissLayer} onPress={() => setChronicPickerVisible(false)} />
+          <View style={styles.chronicModalCard}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>选择慢性病（GBD）</Text>
               <Pressable onPress={() => setChronicPickerVisible(false)}>
@@ -591,8 +594,8 @@ export default function ProfileDetailScreen() {
                 </Pressable>
               </View>
             </View>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -782,6 +785,9 @@ function createStyles(palette: Palette) {
       backgroundColor: 'rgba(0, 0, 0, 0.25)',
       justifyContent: 'center',
       paddingHorizontal: 20,
+    },
+    modalDismissLayer: {
+      ...StyleSheet.absoluteFillObject,
     },
     yearModalCard: {
       backgroundColor: palette.white,

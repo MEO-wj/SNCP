@@ -18,9 +18,8 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#FFF7EE",
-        "foregroundImage": "./assets/images/app_iron2.png"
+        "foregroundImage": "./assets/images/app_iron2_adaptive_fg.png"
       },
-      "usesCleartextTraffic": true,
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "top.handywote.sncpfoodmate"
@@ -35,6 +34,7 @@
         "expo-build-properties",
         {
           "android": {
+            "usesCleartextTraffic": true,
             "enableMinifyInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": true,
             "enablePngCrunchInReleaseBuilds": true

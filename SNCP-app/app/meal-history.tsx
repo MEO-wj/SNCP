@@ -135,8 +135,8 @@ export default function MealHistoryScreen() {
   const isDark = colorScheme === 'dark';
   const styles = useMemo(() => createStyles(palette, isDark), [palette, isDark]);
 
-  const todayKey = useMemo(() => getTodayKey(), []);
-  const [selectedDate, setSelectedDate] = useState(todayKey);
+  const [todayKey, setTodayKey] = useState(() => getTodayKey());
+  const [selectedDate, setSelectedDate] = useState(() => getTodayKey());
   const [meals, setMeals] = useState<Meal[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState('');
@@ -165,15 +165,28 @@ export default function MealHistoryScreen() {
     }
   }, [selectedDate, token]);
 
+  const syncTodayKey = useCallback(() => {
+    const latestToday = getTodayKey();
+    setTodayKey((prev) => {
+      if (prev === latestToday) {
+        return prev;
+      }
+      setSelectedDate((current) => (current === prev ? latestToday : current));
+      return latestToday;
+    });
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
+      syncTodayKey();
       void loadMeals();
-    }, [loadMeals]),
+    }, [loadMeals, syncTodayKey]),
   );
 
   useEffect(() => {
+    syncTodayKey();
     void loadMeals();
-  }, [loadMeals]);
+  }, [loadMeals, syncTodayKey]);
 
   const canGoNext = selectedDate < todayKey;
   const pendingDeleteOption = useMemo(
