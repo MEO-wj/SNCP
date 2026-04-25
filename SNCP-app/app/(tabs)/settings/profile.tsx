@@ -15,6 +15,7 @@ import type { HealthProfile } from '@/types/profile';
 
 const GENDER_OPTIONS = ['男', '女', '其他'] as const;
 const YEAR_ITEM_HEIGHT = 44;
+const NO_CHRONIC_DISEASE_LABEL = '无慢性病';
 
 type ChronicFlatItem = {
   id: number;
@@ -59,6 +60,7 @@ export default function ProfileDetailScreen() {
   );
   const [selectedChronicIds, setSelectedChronicIds] = useState<number[]>([]);
   const [legacyChronicNames, setLegacyChronicNames] = useState<string[]>([]);
+  const [hasNoChronicDisease, setHasNoChronicDisease] = useState(false);
 
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -156,13 +158,13 @@ export default function ProfileDetailScreen() {
     return rows;
   }, [expandedChronicIds]);
 
-  const hasAnyChronicSelected = selectedChronicIds.length > 0 || legacyChronicNames.length > 0;
+  const hasAnyChronicSelected = hasNoChronicDisease || selectedChronicIds.length > 0 || legacyChronicNames.length > 0;
 
   useEffect(() => {
     const selectedNames = selectedChronicIds
       .map((id) => chronicIndex.idToNode.get(id)?.name)
       .filter(Boolean) as string[];
-    const nextConditions = [...selectedNames, ...legacyChronicNames];
+    const nextConditions = hasNoChronicDisease ? [NO_CHRONIC_DISEASE_LABEL] : [...selectedNames, ...legacyChronicNames];
     setProfile((prev) => {
       const current = prev.chronic_conditions || [];
       const isSame =
@@ -176,7 +178,7 @@ export default function ProfileDetailScreen() {
         chronic_conditions: nextConditions,
       };
     });
-  }, [selectedChronicIds, legacyChronicNames, chronicIndex.idToNode]);
+  }, [selectedChronicIds, legacyChronicNames, chronicIndex.idToNode, hasNoChronicDisease]);
 
   useEffect(() => {
     if (!token) {
@@ -187,9 +189,12 @@ export default function ProfileDetailScreen() {
         const nextProfile = res.profile || {};
         setProfile(nextProfile);
         const sourceNames = (nextProfile.chronic_conditions || []).filter(Boolean);
+        const hasNoneSelected = sourceNames.includes(NO_CHRONIC_DISEASE_LABEL);
         const matchedIds: number[] = [];
         const unknownNames: string[] = [];
-        sourceNames.forEach((name) => {
+        sourceNames
+          .filter((name) => name !== NO_CHRONIC_DISEASE_LABEL)
+          .forEach((name) => {
           const id = chronicIndex.normalizedNameToId.get(normalizeKeyword(name));
           if (!id) {
             unknownNames.push(name);
@@ -201,6 +206,7 @@ export default function ProfileDetailScreen() {
         });
         setSelectedChronicIds(matchedIds);
         setLegacyChronicNames(unknownNames);
+        setHasNoChronicDisease(hasNoneSelected);
       })
       .catch(() => {});
   }, [token, chronicIndex.normalizedNameToId]);
@@ -224,6 +230,7 @@ export default function ProfileDetailScreen() {
   };
 
   const toggleChronicById = (id: number) => {
+    setHasNoChronicDisease(false);
     setSelectedChronicIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
   };
 
@@ -243,9 +250,21 @@ export default function ProfileDetailScreen() {
     setLegacyChronicNames((prev) => prev.filter((item) => item !== name));
   };
 
+  const toggleNoChronicDisease = () => {
+    setHasNoChronicDisease((prev) => {
+      const next = !prev;
+      if (next) {
+        setSelectedChronicIds([]);
+        setLegacyChronicNames([]);
+      }
+      return next;
+    });
+  };
+
   const clearChronicSelection = () => {
     setSelectedChronicIds([]);
     setLegacyChronicNames([]);
+    setHasNoChronicDisease(false);
   };
 
   const fallbackYear = yearOptions[Math.min(25, yearOptions.length - 1)];
@@ -370,6 +389,13 @@ export default function ProfileDetailScreen() {
           <View style={styles.sectionBlock}>
             <Text style={styles.formLabel}>慢性病标签</Text>
             <View style={styles.tagGroup}>
+              {hasNoChronicDisease ? (
+                <Pressable style={styles.tagChipNone} onPress={toggleNoChronicDisease}>
+                  <Text style={styles.tagChipNoneText}>{NO_CHRONIC_DISEASE_LABEL}</Text>
+                  <Text style={styles.tagChipRemoveText}>×</Text>
+                </Pressable>
+              ) : null}
+
               {selectedChronicItems.map((item) => (
                 <Pressable
                   key={item.id}
@@ -535,6 +561,16 @@ export default function ProfileDetailScreen() {
               ) : null}
             </View>
 
+            <Pressable
+              style={[styles.noneChronicButton, hasNoChronicDisease && styles.noneChronicButtonActive]}
+              onPress={toggleNoChronicDisease}
+            >
+              <View style={[styles.selectMarker, hasNoChronicDisease && styles.selectMarkerActive]} />
+              <Text style={[styles.noneChronicButtonText, hasNoChronicDisease && styles.noneChronicButtonTextActive]}>
+                {NO_CHRONIC_DISEASE_LABEL}
+              </Text>
+            </Pressable>
+
             <ScrollView style={styles.chronicList} contentContainerStyle={styles.chronicListContent}>
               {chronicSearchKeyword ? (
                 chronicSearchResults.length === 0 ? (
@@ -584,7 +620,9 @@ export default function ProfileDetailScreen() {
             </ScrollView>
 
             <View style={styles.chronicFooter}>
-              <Text style={styles.chronicFooterText}>已选 {selectedChronicIds.length + legacyChronicNames.length} 项</Text>
+              <Text style={styles.chronicFooterText}>
+                已选 {selectedChronicIds.length + legacyChronicNames.length + (hasNoChronicDisease ? 1 : 0)} 项
+              </Text>
               <View style={styles.chronicFooterActions}>
                 <Pressable style={styles.footerGhostButton} onPress={clearChronicSelection}>
                   <Text style={styles.footerGhostButtonText}>清空</Text>
@@ -744,6 +782,22 @@ function createStyles(palette: Palette) {
       fontSize: 13,
       color: palette.stone700,
       fontWeight: '600',
+    },
+    tagChipNone: {
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: palette.green500,
+      backgroundColor: '#EAF8EA',
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    tagChipNoneText: {
+      fontSize: 13,
+      color: palette.green500,
+      fontWeight: '700',
     },
     tagChipRemoveText: {
       fontSize: 14,
@@ -912,6 +966,29 @@ function createStyles(palette: Palette) {
       fontSize: 12,
       color: palette.stone500,
       fontWeight: '600',
+    },
+    noneChronicButton: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: palette.stone200,
+      backgroundColor: palette.surfaceWarm,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    noneChronicButtonActive: {
+      borderColor: palette.green500,
+      backgroundColor: '#EAF8EA',
+    },
+    noneChronicButtonText: {
+      fontSize: 14,
+      color: palette.stone700,
+      fontWeight: '700',
+    },
+    noneChronicButtonTextActive: {
+      color: palette.green500,
     },
     chronicList: {
       maxHeight: 380,

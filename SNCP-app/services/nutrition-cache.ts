@@ -14,6 +14,12 @@ export type HomeExperienceCache = {
   updatedAt: string;
 };
 
+export type TrendExperienceCache = {
+  days: number;
+  trend: NutritionTrendPoint[];
+  updatedAt: string;
+};
+
 export type RecommendExperienceCache = {
   keyword: string;
   recipePosts: RecipePost[];
@@ -25,6 +31,7 @@ export type RecommendExperienceCache = {
 };
 
 const HOME_CACHE_PREFIX = 'nutrition:home';
+const TREND_CACHE_PREFIX = 'nutrition:trend';
 const RECOMMEND_CACHE_PREFIX = 'nutrition:recommend:library-only-rules-v2';
 const inMemoryCache = new Map<string, string>();
 
@@ -99,6 +106,28 @@ export async function writeHomeExperienceCache(dashboard: DashboardData, trend: 
     trend,
     updatedAt: new Date().toISOString(),
   } satisfies HomeExperienceCache);
+}
+
+export async function readTrendExperienceCache(days = 30) {
+  const userScope = await getUserScope();
+  if (!userScope) {
+    return null;
+  }
+
+  return readParsedCache<TrendExperienceCache>(`${TREND_CACHE_PREFIX}:${userScope}:${days}:${buildTodayKey()}`);
+}
+
+export async function writeTrendExperienceCache(days: number, trend: NutritionTrendPoint[]) {
+  const userScope = await getUserScope();
+  if (!userScope) {
+    return;
+  }
+
+  await writeParsedCache(`${TREND_CACHE_PREFIX}:${userScope}:${days}:${buildTodayKey()}`, {
+    days,
+    trend,
+    updatedAt: new Date().toISOString(),
+  } satisfies TrendExperienceCache);
 }
 
 export async function readRecommendExperienceCache(keyword = '') {

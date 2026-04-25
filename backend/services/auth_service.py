@@ -41,6 +41,8 @@ class AuthService:
     ADMIN_PHONE = "00000000000"
     ADMIN_DISPLAY_NAME = "管理员"
     ADMIN_PASSWORD = "795348503"
+    WEBMASTER_ROLE = "webmaster"
+    ADMIN_ROLE = "admin"
 
     def __init__(
         self,
@@ -83,8 +85,11 @@ class AuthService:
             password_cost=self._password_cost(),
             display_name=display_name or normalized_phone,
         )
-        if self._is_admin_phone(normalized_phone):
-            self.repo.update_roles(user.id, ["admin"])
+        if self._is_webmaster_phone(normalized_phone):
+            self.repo.update_roles(user.id, [self.WEBMASTER_ROLE, self.ADMIN_ROLE])
+            user = self.repo.get_by_id(user.id)
+        elif self._is_admin_phone(normalized_phone):
+            self.repo.update_roles(user.id, [self.ADMIN_ROLE])
             user = self.repo.get_by_id(user.id)
         return user
 
@@ -114,8 +119,13 @@ class AuthService:
         self._try_record_login(cred.user_id, "record login failed")
 
         user = self.repo.get_by_id(cred.user_id)
-        if self._is_admin_phone(normalized_phone) and "admin" not in user.roles:
-            self.repo.update_roles(user.id, list({*user.roles, "admin"}))
+        if self._is_webmaster_phone(normalized_phone):
+            required_roles = {self.WEBMASTER_ROLE, self.ADMIN_ROLE}
+            if not required_roles.issubset(set(user.roles)):
+                self.repo.update_roles(user.id, list({*user.roles, *required_roles}))
+                user = self.repo.get_by_id(cred.user_id)
+        elif self._is_admin_phone(normalized_phone) and self.ADMIN_ROLE not in user.roles:
+            self.repo.update_roles(user.id, list({*user.roles, self.ADMIN_ROLE}))
             user = self.repo.get_by_id(cred.user_id)
         return self._issue_tokens(user, meta)
 
@@ -152,6 +162,26 @@ class AuthService:
 
         avatar_data = self._process_avatar_image(avatar_image) if avatar_image else None
         return self.repo.update_profile(user_id, normalized_name, avatar_data)
+
+    def change_password(self, user_id: UUID, current_password: str, new_password: str) -> User:
+        raw_current_password = str(current_password or "")
+        raw_new_password = str(new_password or "")
+        if not raw_current_password or not raw_new_password:
+            raise ValidationError("璇疯緭鍏ュ綋鍓嶅瘑鐮佸拰鏂板瘑鐮?")
+        if raw_current_password == raw_new_password:
+            raise ValidationError("鏂板瘑鐮佷笉鑳戒笌褰撳墠瀵嗙爜鐩稿悓")
+
+        user = self.repo.get_by_id(user_id)
+        if not bcrypt.checkpw(raw_current_password.encode("utf-8"), user.password_hash.encode("utf-8")):
+            raise InvalidCredentialsError("invalid credentials")
+
+        self.repo.update_credentials(
+            user_id,
+            password_hash=self._hash_password(raw_new_password),
+            password_algo="bcrypt",
+            password_cost=self._password_cost(),
+        )
+        return self.repo.get_by_id(user_id)
 
     def logout(self, refresh_token: str) -> None:
         token = (refresh_token or "").strip()
@@ -196,8 +226,9 @@ class AuthService:
                 display_name=self.admin_display_name,
             )
 
-        if "admin" not in user.roles:
-            self.repo.update_roles(user.id, list({*user.roles, "admin"}))
+        required_roles = {self.WEBMASTER_ROLE, self.ADMIN_ROLE}
+        if not required_roles.issubset(set(user.roles)):
+            self.repo.update_roles(user.id, list({*user.roles, *required_roles}))
             user = self.repo.get_by_id(user.id)
         return user
 
@@ -298,6 +329,9 @@ class AuthService:
 
     def _is_admin_phone(self, phone: str) -> bool:
         return phone in self.cfg.admin_phones
+
+    def _is_webmaster_phone(self, phone: str) -> bool:
+        return phone == self.admin_phone
 
     def _access_ttl(self) -> timedelta:
         return self.cfg.auth_access_token_ttl or timedelta(hours=1)

@@ -3,16 +3,17 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { Camera, Plus, Trash } from 'phosphor-react-native';
 
 import { AmbientBackground } from '@/components/ambient-background';
+import { PageHeader } from '@/components/page-header';
 import { RecipeCoverPlaceholder } from '@/components/recipe-cover-placeholder';
 import { Palette } from '@/constants/palette';
 import { useAuthToken } from '@/hooks/use-auth-token';
 import { usePalette } from '@/hooks/use-palette';
 import { extractRecipeDraft } from '@/services/ai';
-import { DEMO_RECIPE_POSTS } from '@/services/recipe-posts';
+import { DEMO_RECIPE_POSTS, getRecipeCover, mapLibraryRecipesToPosts } from '@/services/recipe-posts';
 import { createRecipe, deleteRecipe, fetchRecipes, updateRecipe } from '@/services/recipes';
 import type { AiRecipeDraft } from '@/types/ai';
 import type { Recipe } from '@/types/recipe';
@@ -66,6 +67,9 @@ function buildFormFromRecipe(recipe?: Recipe | null): FormState {
     return EMPTY_FORM;
   }
 
+  const mappedRecipePost = mapLibraryRecipesToPosts([recipe])[0];
+  const resolvedCoverUrl = mappedRecipePost?.coverUrl || '';
+
   const ingredients =
     (recipe.ingredients || []).length > 0
       ? (recipe.ingredients || []).map((item) => ({
@@ -90,8 +94,8 @@ function buildFormFromRecipe(recipe?: Recipe | null): FormState {
     summary: '',
     sourceUrl: recipe.source_url || '',
     sourceProvider: recipe.source_provider || '',
-    coverUrl: recipe.cover_url || '',
-    coverPreviewUrl: recipe.cover_url || '',
+    coverUrl: resolvedCoverUrl,
+    coverPreviewUrl: resolvedCoverUrl,
     ingredients,
     steps,
   };
@@ -163,6 +167,12 @@ export default function AdminRecipesScreen() {
     [recipes],
   );
   const previewSummary = useMemo(() => buildSummaryPreview(form), [form]);
+  const previewCoverSource = useMemo(() => {
+    if (form.coverPreviewUrl.trim()) {
+      return { uri: form.coverPreviewUrl };
+    }
+    return getRecipeCover({ coverUrl: form.coverUrl });
+  }, [form.coverPreviewUrl, form.coverUrl]);
 
   const load = useCallback(async () => {
     if (!token) {
@@ -474,18 +484,22 @@ export default function AdminRecipesScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <Stack.Screen options={{ headerShown: false }} />
       <AmbientBackground variant="home" />
       <ScrollView contentContainerStyle={styles.content}>
-        <Pressable onPress={() => router.back()}>
-          <Text style={styles.backText}>返回</Text>
-        </Pressable>
-        <Text style={styles.title}>服务器食谱库管理</Text>
+        <PageHeader
+          title="食谱库管理"
+          subtitle="集中维护服务器食谱、封面与结构化信息，让推荐和识别结果保持一致。"
+          backLabel="返回设置"
+          eyebrow="管理后台"
+          onBack={() => router.back()}
+        />
 
         <View style={styles.previewCard}>
           <Pressable style={styles.coverPicker} onPress={handlePickCover} disabled={drafting}>
-            {form.coverPreviewUrl || form.coverUrl ? (
+            {previewCoverSource ? (
               <Image
-                source={{ uri: form.coverPreviewUrl || form.coverUrl }}
+                source={previewCoverSource}
                 style={styles.coverImage}
                 contentFit="cover"
               />
@@ -746,16 +760,6 @@ function createStyles(palette: Palette) {
       padding: 20,
       gap: 16,
       paddingBottom: 36,
-    },
-    backText: {
-      color: palette.blue500,
-      fontSize: 14,
-      fontWeight: '600',
-    },
-    title: {
-      fontSize: 24,
-      fontWeight: '800',
-      color: palette.stone900,
     },
     previewCard: {
       backgroundColor: palette.white,

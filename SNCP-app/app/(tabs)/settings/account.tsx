@@ -11,7 +11,7 @@ import { Palette } from '@/constants/palette';
 import { useAuthToken } from '@/hooks/use-auth-token';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePalette } from '@/hooks/use-palette';
-import { fetchMyAccount, updateMyAccount } from '@/services/account';
+import { changeMyPassword, fetchMyAccount, updateMyAccount } from '@/services/account';
 import { setUserProfileRaw } from '@/storage/auth-storage';
 
 export default function AccountDetailScreen() {
@@ -26,8 +26,17 @@ export default function AccountDetailScreen() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
   const [avatarImagePayload, setAvatarImagePayload] = useState<string | null>(null);
+
   const [saving, setSaving] = useState(false);
-  const [errorText, setErrorText] = useState('');
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [profileErrorText, setProfileErrorText] = useState('');
+  const [passwordErrorText, setPasswordErrorText] = useState('');
+  const [passwordSuccessText, setPasswordSuccessText] = useState('');
+
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
   const hasPickedAvatarRef = useRef(false);
 
   useEffect(() => {
@@ -44,20 +53,19 @@ export default function AccountDetailScreen() {
       })
       .catch((error) => {
         console.error('[Account] load failed', error);
-        setErrorText('加载个人信息失败，请稍后重试');
+        setProfileErrorText('加载个人信息失败，请稍后重试');
       });
   }, [token]);
 
   const avatarSeed = (displayName || phone || '我').trim();
   const avatarText = avatarSeed.slice(0, 1).toUpperCase();
-
   const displayAvatarUrl = avatarPreviewUrl || avatarUrl;
 
   const handlePickAvatar = async () => {
-    setErrorText('');
+    setProfileErrorText('');
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      setErrorText('需要相册权限才能选择头像');
+      setProfileErrorText('需要相册权限才能选择头像');
       return;
     }
 
@@ -74,7 +82,7 @@ export default function AccountDetailScreen() {
 
     const asset = result.assets[0];
     if (!asset?.base64) {
-      setErrorText('头像读取失败，请重新选择');
+      setProfileErrorText('头像读取失败，请重新选择');
       return;
     }
 
@@ -89,14 +97,15 @@ export default function AccountDetailScreen() {
     if (!token) {
       return;
     }
+
     const nextName = displayName.trim();
     if (!nextName) {
-      setErrorText('昵称不能为空');
+      setProfileErrorText('昵称不能为空');
       return;
     }
 
     setSaving(true);
-    setErrorText('');
+    setProfileErrorText('');
     try {
       const res = await updateMyAccount(
         {
@@ -116,13 +125,56 @@ export default function AccountDetailScreen() {
       );
       setAvatarUrl(res.user.avatar_url || displayAvatarUrl || null);
       setAvatarPreviewUrl(null);
+      setAvatarImagePayload(null);
       hasPickedAvatarRef.current = false;
       router.back();
     } catch (error) {
       const message = error instanceof Error ? error.message : '保存失败，请稍后重试';
-      setErrorText(message);
+      setProfileErrorText(message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!token) {
+      return;
+    }
+
+    setPasswordErrorText('');
+    setPasswordSuccessText('');
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordErrorText('请填写当前密码、新密码和确认新密码');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordErrorText('两次输入的新密码不一致');
+      return;
+    }
+    if (currentPassword === newPassword) {
+      setPasswordErrorText('新密码不能与当前密码相同');
+      return;
+    }
+
+    setPasswordSaving(true);
+    try {
+      await changeMyPassword(
+        {
+          current_password: currentPassword,
+          new_password: newPassword,
+        },
+        token,
+      );
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPasswordSuccessText('密码已更新，后续登录请使用新密码');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '修改密码失败，请稍后重试';
+      setPasswordErrorText(message);
+    } finally {
+      setPasswordSaving(false);
     }
   };
 
@@ -157,10 +209,12 @@ export default function AccountDetailScreen() {
               <Text style={styles.avatarHint}>选择后会压缩裁剪再保存</Text>
             </View>
           </View>
+
           <View style={styles.formRow}>
             <Text style={styles.formLabel}>手机号</Text>
             <TextInput value={phone} editable={false} style={[styles.formInput, styles.disabledInput]} />
           </View>
+
           <View style={styles.formRow}>
             <Text style={styles.formLabel}>昵称</Text>
             <TextInput
@@ -172,13 +226,74 @@ export default function AccountDetailScreen() {
               placeholderTextColor={palette.stone400}
             />
           </View>
-          <Text style={styles.helperText}>当前支持修改头像和昵称，手机号暂不支持修改。</Text>
-          {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
+
+          <Text style={styles.helperText}>当前支持修改头像、昵称和登录密码，手机号暂不支持修改。</Text>
+          {profileErrorText ? <Text style={styles.errorText}>{profileErrorText}</Text> : null}
         </View>
 
         <Pressable style={styles.primaryButton} onPress={handleSave} disabled={saving}>
           <Text style={styles.primaryButtonText}>{saving ? '保存中...' : '保存信息'}</Text>
         </Pressable>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>修改密码</Text>
+
+          <View style={styles.formRow}>
+            <Text style={styles.formLabel}>当前</Text>
+            <TextInput
+              value={currentPassword}
+              onChangeText={setCurrentPassword}
+              style={styles.formInput}
+              placeholder="请输入当前密码"
+              placeholderTextColor={palette.stone400}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+
+          <View style={styles.formRow}>
+            <Text style={styles.formLabel}>新密码</Text>
+            <TextInput
+              value={newPassword}
+              onChangeText={setNewPassword}
+              style={styles.formInput}
+              placeholder="请输入新密码"
+              placeholderTextColor={palette.stone400}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+
+          <View style={styles.formRow}>
+            <Text style={styles.formLabel}>确认</Text>
+            <TextInput
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              style={styles.formInput}
+              placeholder="再输入一次新密码"
+              placeholderTextColor={palette.stone400}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+
+          <Text style={styles.helperText}>修改后原密码会立即失效，后续登录请使用新密码。</Text>
+          {passwordErrorText ? <Text style={styles.errorText}>{passwordErrorText}</Text> : null}
+          {passwordSuccessText ? <Text style={styles.successText}>{passwordSuccessText}</Text> : null}
+
+          <Pressable
+            style={styles.secondaryPrimaryButton}
+            onPress={handleChangePassword}
+            disabled={passwordSaving}
+          >
+            <Text style={styles.secondaryPrimaryButtonText}>
+              {passwordSaving ? '修改中...' : '修改密码'}
+            </Text>
+          </Pressable>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -213,6 +328,11 @@ function createStyles(palette: Palette, isDark: boolean) {
       borderWidth: 1,
       borderColor: palette.stone100,
       gap: 14,
+    },
+    cardTitle: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: palette.stone850,
     },
     avatarSection: {
       flexDirection: 'row',
@@ -308,6 +428,11 @@ function createStyles(palette: Palette, isDark: boolean) {
       fontSize: 12,
       color: palette.imperial500,
     },
+    successText: {
+      marginTop: 2,
+      fontSize: 12,
+      color: palette.green500,
+    },
     primaryButton: {
       backgroundColor: isDark ? palette.orange500 : palette.stone900,
       borderRadius: 18,
@@ -317,6 +442,18 @@ function createStyles(palette: Palette, isDark: boolean) {
     primaryButtonText: {
       color: isDark ? palette.surface : palette.gold50,
       fontSize: 16,
+      fontWeight: '700',
+    },
+    secondaryPrimaryButton: {
+      marginTop: 4,
+      backgroundColor: palette.orange500,
+      borderRadius: 16,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    secondaryPrimaryButtonText: {
+      color: palette.white,
+      fontSize: 15,
       fontWeight: '700',
     },
   });

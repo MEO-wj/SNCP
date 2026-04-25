@@ -1035,20 +1035,20 @@ export default function RecordScreen() {
 
         <View style={styles.card}>
           <View style={styles.savedHeader}>
-            <View>
+            <View style={styles.savedHeaderContent}>
               <Text style={styles.cardTitle}>今日餐次</Text>
               <Text style={styles.cardHint}>每一餐都会显示时间、营养概览和食物组成。</Text>
             </View>
             <View style={styles.savedHeaderActions}>
-            <Pressable style={styles.historyEntryButton} onPress={() => router.push('/meal-history')}>
-              <ClockCounterClockwise size={14} color={palette.orange500} weight="bold" />
-              <Text style={styles.historyEntryButtonText}>历史卡片</Text>
-            </Pressable>
-            <View style={styles.savedBadge}>
-              <Clock size={14} color={palette.blue500} weight="duotone" />
-              <Text style={styles.savedBadgeText}>{meals.length} 张卡片</Text>
+              <Pressable style={styles.historyEntryButton} onPress={() => router.push('/meal-history')}>
+                <ClockCounterClockwise size={14} color={palette.orange500} weight="bold" />
+                <Text style={styles.historyEntryButtonText}>历史卡片</Text>
+              </Pressable>
+              <View style={styles.savedBadge}>
+                <Clock size={14} color={palette.blue500} weight="duotone" />
+                <Text style={styles.savedBadgeText}>{meals.length} 张卡片</Text>
+              </View>
             </View>
-          </View>
           </View>
           {meals.length === 0 ? (
             <Text style={styles.emptyText}>今天还没有记录，先在上面挑一餐试试。</Text>
@@ -1944,13 +1944,19 @@ function createStyles(palette: Palette, isDark: boolean) {
     },
     savedHeader: {
       flexDirection: 'row',
-      justifyContent: 'space-between',
       alignItems: 'flex-start',
       gap: 12,
+      flexWrap: 'wrap',
+    },
+    savedHeaderContent: {
+      flex: 1,
+      minWidth: 0,
     },
     savedHeaderActions: {
-      alignItems: 'flex-end',
+      flexDirection: 'column',
+      alignItems: 'flex-start',
       gap: 8,
+      maxWidth: '100%',
     },
     historyEntryButton: {
       flexDirection: 'row',

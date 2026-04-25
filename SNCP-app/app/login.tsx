@@ -18,11 +18,14 @@ import { AmbientBackground } from '@/components/ambient-background';
 import { colors } from '@/constants/palette';
 import { shadows } from '@/constants/shadows';
 import { setAuthToken } from '@/hooks/use-auth-token';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getApiBaseUrl } from '@/services/api';
 import { setRefreshToken, setUserProfileRaw } from '@/storage/auth-storage';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -83,8 +86,8 @@ export default function LoginScreen() {
             <View style={styles.logoBox}>
               <MaterialCommunityIcons name="silverware-fork-knife" size={28} color={colors.gold50} />
             </View>
-            <Text style={styles.title}>
-              柠芙{'\n'}
+            <Text style={[styles.title, isDark && styles.titleDark]}>
+              柠芯{'\n'}
               <Text style={styles.titleAccent}>食伴</Text>
             </Text>
             <Text style={styles.subtitle}>记录饮食 · 守护营养</Text>
@@ -191,6 +194,9 @@ const styles = StyleSheet.create({
     color: colors.stone900,
     lineHeight: 46,
     letterSpacing: -1,
+  },
+  titleDark: {
+    color: '#F6F2EE',
   },
   titleAccent: {
     color: colors.green500,

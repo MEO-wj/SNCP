@@ -1,4 +1,4 @@
-"""认证路由：注册、登录、刷新和个人资料。"""
+"""认证路由：注册、登录、刷新、退出和个人资料。"""
 
 from __future__ import annotations
 
@@ -23,10 +23,10 @@ auth_service = AuthService(config, user_repo, logger=logger)
 
 def _user_payload(user, include_avatar: bool = False) -> dict[str, Any]:
     payload = {
-      "id": str(user.id),
-      "phone": user.phone,
-      "display_name": user.display_name,
-      "roles": user.roles,
+        "id": str(user.id),
+        "phone": user.phone,
+        "display_name": user.display_name,
+        "roles": user.roles,
     }
     if include_avatar:
         payload["avatar_url"] = user.avatar_data
@@ -45,6 +45,15 @@ def _bearer_token() -> str | None:
     if auth_header.lower().startswith("bearer "):
         return auth_header.split(" ", 1)[1]
     return None
+
+
+def _has_admin_access(roles: list[str] | None) -> bool:
+    normalized_roles = set(roles or [])
+    return "admin" in normalized_roles or "webmaster" in normalized_roles
+
+
+def _has_webmaster_access(roles: list[str] | None) -> bool:
+    return "webmaster" in set(roles or [])
 
 
 def login_required(func: Callable[..., Any]):
@@ -69,8 +78,25 @@ def admin_required(func: Callable[..., Any]):
         except UnauthorizedError:
             return jsonify({"error": "未授权访问"}), 401
         roles = claims.get("roles") or []
-        if "admin" not in roles:
+        if not _has_admin_access(roles):
             return jsonify({"error": "需要管理员权限"}), 403
+        request.auth_claims = claims  # type: ignore[attr-defined]
+        return func(*args, **kwargs)
+
+    wrapper.__name__ = func.__name__
+    return wrapper
+
+
+def webmaster_required(func: Callable[..., Any]):
+    def wrapper(*args, **kwargs):
+        token = _bearer_token()
+        try:
+            claims = auth_service.parse_access_token(token or "")
+        except UnauthorizedError:
+            return jsonify({"error": "未授权访问"}), 401
+        roles = claims.get("roles") or []
+        if not _has_webmaster_access(roles):
+            return jsonify({"error": "需要站长权限"}), 403
         request.auth_claims = claims  # type: ignore[attr-defined]
         return func(*args, **kwargs)
 
@@ -94,15 +120,18 @@ def login():
         logger.exception("login failed")
         return jsonify({"error": f"登录失败: {exc}"}), 500
 
-    return jsonify(
-        {
-            "access_token": result.access_token,
-            "refresh_token": result.refresh_token,
-            "token_type": "bearer",
-            "expires_in": int(config.auth_access_token_ttl.total_seconds()),
-            "user": _user_payload(result.user),
-        }
-    ), 200
+    return (
+        jsonify(
+            {
+                "access_token": result.access_token,
+                "refresh_token": result.refresh_token,
+                "token_type": "bearer",
+                "expires_in": int(config.auth_access_token_ttl.total_seconds()),
+                "user": _user_payload(result.user),
+            }
+        ),
+        200,
+    )
 
 
 @bp.route("/register", methods=["POST"])
@@ -121,15 +150,18 @@ def register():
         logger.exception("register failed")
         return jsonify({"error": f"注册失败: {exc}"}), 500
 
-    return jsonify(
-        {
-            "access_token": result.access_token,
-            "refresh_token": result.refresh_token,
-            "token_type": "bearer",
-            "expires_in": int(config.auth_access_token_ttl.total_seconds()),
-            "user": _user_payload(user),
-        }
-    ), 201
+    return (
+        jsonify(
+            {
+                "access_token": result.access_token,
+                "refresh_token": result.refresh_token,
+                "token_type": "bearer",
+                "expires_in": int(config.auth_access_token_ttl.total_seconds()),
+                "user": _user_payload(user),
+            }
+        ),
+        201,
+    )
 
 
 @bp.route("/token/refresh", methods=["POST"])
@@ -146,15 +178,18 @@ def refresh():
         logger.exception("refresh failed")
         return jsonify({"error": f"刷新失败: {exc}"}), 500
 
-    return jsonify(
-        {
-            "access_token": result.access_token,
-            "refresh_token": result.refresh_token,
-            "token_type": "bearer",
-            "expires_in": int(config.auth_access_token_ttl.total_seconds()),
-            "user": _user_payload(result.user),
-        }
-    ), 200
+    return (
+        jsonify(
+            {
+                "access_token": result.access_token,
+                "refresh_token": result.refresh_token,
+                "token_type": "bearer",
+                "expires_in": int(config.auth_access_token_ttl.total_seconds()),
+                "user": _user_payload(result.user),
+            }
+        ),
+        200,
+    )
 
 
 @bp.route("/logout", methods=["POST"])
@@ -221,3 +256,30 @@ def update_me():
         return jsonify({"error": f"更新失败: {exc}"}), 500
 
     return jsonify({"user": _user_payload(user, include_avatar=True)}), 200
+
+
+@bp.route("/me/password", methods=["PUT"])
+@login_required
+def change_my_password():
+    claims = getattr(request, "auth_claims", {})
+    user_id = claims.get("sub")
+    if not user_id:
+        return jsonify({"error": "未授权访问"}), 401
+
+    data = request.get_json(force=True, silent=True) or {}
+    current_password = str(data.get("current_password") or "")
+    new_password = str(data.get("new_password") or "")
+
+    try:
+        auth_service.change_password(UUID(str(user_id)), current_password, new_password)
+    except ValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except InvalidCredentialsError:
+        return jsonify({"error": "当前密码错误"}), 401
+    except (ValueError, NotFoundError):
+        return jsonify({"error": "用户不存在"}), 404
+    except Exception as exc:  # pragma: no cover
+        logger.exception("change password failed")
+        return jsonify({"error": f"修改密码失败: {exc}"}), 500
+
+    return jsonify({"message": "密码已更新"}), 200

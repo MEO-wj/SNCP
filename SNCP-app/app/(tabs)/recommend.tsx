@@ -177,7 +177,7 @@ export default function RecommendScreen() {
   const [errorText, setErrorText] = useState('');
   const [refreshRound, setRefreshRound] = useState(0);
 
-  const isAdmin = Boolean(profile?.roles?.includes('admin'));
+  const isAdmin = Boolean(profile?.roles?.includes('admin') || profile?.roles?.includes('webmaster'));
 
   const syncExperienceCache = useCallback(
     async (nextKeyword: string, nextRecipePosts: RecipePost[], nextRecommendationPosts: RecipePost[], nextProvider: string, nextMessage: string) => {

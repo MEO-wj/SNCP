@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 
 import { AmbientBackground } from '@/components/ambient-background';
+import { PageHeader } from '@/components/page-header';
 import { Palette } from '@/constants/palette';
 import { useAuthToken } from '@/hooks/use-auth-token';
 import { usePalette } from '@/hooks/use-palette';
@@ -58,12 +59,16 @@ export default function RemindersScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <Stack.Screen options={{ headerShown: false }} />
       <AmbientBackground variant="home" />
       <ScrollView contentContainerStyle={styles.content}>
-        <Pressable onPress={() => router.back()}>
-          <Text style={styles.backText}>返回</Text>
-        </Pressable>
-        <Text style={styles.title}>提醒设置</Text>
+        <PageHeader
+          title="提醒设置"
+          subtitle="在这里维护每日提醒时间和备注，减少漏餐与忘记记录的情况。"
+          backLabel="返回我的"
+          eyebrow="功能入口"
+          onBack={() => router.back()}
+        />
         <View style={styles.card}>
           <Text style={styles.cardTitle}>新增提醒</Text>
           <View style={styles.formRow}>
@@ -111,16 +116,6 @@ function createStyles(palette: Palette) {
       padding: 20,
       gap: 16,
       flexGrow: 1,
-    },
-    backText: {
-      color: palette.blue500,
-      fontSize: 14,
-      fontWeight: '600',
-    },
-    title: {
-      fontSize: 22,
-      fontWeight: '800',
-      color: palette.stone900,
     },
     card: {
       backgroundColor: palette.white,

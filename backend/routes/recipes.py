@@ -31,7 +31,7 @@ def _resolve_scope(default: str = "all") -> str:
 def _request_is_admin() -> bool:
     claims = getattr(request, "auth_claims", {}) or {}
     roles = claims.get("roles") or []
-    return "admin" in roles
+    return "admin" in roles or "webmaster" in roles
 
 
 def _public_base_url() -> str:

@@ -8,6 +8,7 @@ from datetime import date
 from flask import Blueprint, jsonify, request
 
 from ai_end.services.ai_service import AIService
+from backend.repository.admin_dashboard_repository import AdminDashboardRepository
 from backend.repository.health_rule_repository import HealthRuleRepository
 from backend.repository.profile_repository import ProfileRepository
 from backend.repository.recipe_repository import RecipeRepository
@@ -40,6 +41,7 @@ ai_service = AIService()
 profile_repo = ProfileRepository()
 rule_repo = HealthRuleRepository()
 recipe_repo = RecipeRepository()
+dashboard_repo = AdminDashboardRepository()
 
 
 def _image_payload_or_400(data: dict):
@@ -112,6 +114,60 @@ def _prefer_local_recipes_by_name(recipes: list[dict]) -> list[dict]:
     return [by_name[key] for key in order]
 
 
+def _extract_ai_meta(value):
+    if isinstance(value, dict):
+        meta = value.get("_meta_ai")
+        if isinstance(meta, dict):
+            return meta
+        for item in value.values():
+            found = _extract_ai_meta(item)
+            if isinstance(found, dict):
+                return found
+        return None
+    if isinstance(value, list):
+        for item in value:
+            found = _extract_ai_meta(item)
+            if isinstance(found, dict):
+                return found
+    return None
+
+
+def _strip_private_fields(value):
+    if isinstance(value, dict):
+        return {
+            key: _strip_private_fields(item)
+            for key, item in value.items()
+            if not str(key).startswith("_")
+        }
+    if isinstance(value, list):
+        return [_strip_private_fields(item) for item in value]
+    return value
+
+
+def _log_ai_usage_if_available(result, *, endpoint: str, user_id) -> None:
+    if not user_id:
+        return
+
+    meta = _extract_ai_meta(result)
+    if not isinstance(meta, dict):
+        return
+
+    usage = meta.get("usage") if isinstance(meta.get("usage"), dict) else {}
+    try:
+        dashboard_repo.log_ai_usage(
+            user_id,
+            endpoint=endpoint,
+            provider=str(meta.get("provider") or "unknown"),
+            model_name=str(meta.get("model") or "unknown"),
+            model_kind=str(meta.get("model_kind") or "text"),
+            prompt_tokens=int(usage.get("prompt_tokens") or 0),
+            completion_tokens=int(usage.get("completion_tokens") or 0),
+            total_tokens=int(usage.get("total_tokens") or 0),
+        )
+    except Exception:  # pragma: no cover
+        logger.exception("failed to log ai usage for endpoint %s", endpoint)
+
+
 @bp.route("/recognize", methods=["POST"])
 @login_required
 def recognize_food():
@@ -123,7 +179,12 @@ def recognize_food():
     image_base64, image_url, hint_text = payload
     try:
         result = ai_service.recognize_foods(image_base64, image_url, hint_text)
-        return jsonify(result), 200
+        _log_ai_usage_if_available(
+            result,
+            endpoint="/api/ai/recognize",
+            user_id=get_request_user_id(request),
+        )
+        return jsonify(_strip_private_fields(result)), 200
     except Exception as exc:  # pragma: no cover
         logger.exception("food recognition failed")
         return jsonify({"error": f"识别失败: {exc}"}), 500
@@ -140,7 +201,12 @@ def extract_recipe_draft():
     image_base64, image_url, hint_text = payload
     try:
         result = ai_service.extract_recipe_draft(image_base64, image_url, hint_text)
-        return jsonify(result), 200
+        _log_ai_usage_if_available(
+            result,
+            endpoint="/api/ai/recipe-draft",
+            user_id=get_request_user_id(request),
+        )
+        return jsonify(_strip_private_fields(result)), 200
     except Exception as exc:  # pragma: no cover
         logger.exception("recipe draft extraction failed")
         return jsonify({"error": f"识别食谱资料失败: {exc}"}), 500
@@ -181,17 +247,22 @@ def analyze_nutrition():
         }
     )
 
+    response_payload = {
+        "totals": totals,
+        "macro_ratio": macro_ratio,
+        "goal_checks": goal_checks,
+        "warnings": warnings,
+        "suggestions": suggestions,
+        "ai": ai_result,
+    }
+    _log_ai_usage_if_available(
+        response_payload,
+        endpoint="/api/ai/analyze",
+        user_id=user_id,
+    )
+
     return (
-        jsonify(
-            {
-                "totals": totals,
-                "macro_ratio": macro_ratio,
-                "goal_checks": goal_checks,
-                "warnings": warnings,
-                "suggestions": suggestions,
-                "ai": ai_result,
-            }
-        ),
+        jsonify(_strip_private_fields(response_payload)),
         200,
     )
 
@@ -206,7 +277,7 @@ def recommend_recipes():
     recommend_version = state_version * 1000000 + library_version
     cached_result = get_recipe_recommend_cache(user_id, recommend_version, data) if user_id else None
     if cached_result is not None:
-        return jsonify(_normalize_recommend_result(cached_result)), 200
+        return jsonify(_strip_private_fields(_normalize_recommend_result(cached_result))), 200
 
     profile = profile_repo.get_profile(user_id) if user_id else None
     goals = profile_repo.get_goals(user_id) if user_id else None
@@ -250,7 +321,12 @@ def recommend_recipes():
         "local_recipes": local_recipes,
         "server_recipes": server_recipes,
     }
-    result = _normalize_recommend_result(result)
+    _log_ai_usage_if_available(
+        result,
+        endpoint="/api/ai/recommend",
+        user_id=user_id,
+    )
+    public_result = _strip_private_fields(_normalize_recommend_result(result))
     if user_id:
-        set_recipe_recommend_cache(user_id, recommend_version, data, result)
-    return jsonify(result), 200
+        set_recipe_recommend_cache(user_id, recommend_version, data, public_result)
+    return jsonify(public_result), 200

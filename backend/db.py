@@ -162,6 +162,43 @@ def init_db() -> None:
         );
         """,
         "CREATE INDEX IF NOT EXISTS reminders_user_idx ON reminders(user_id);",
+        """
+        CREATE TABLE IF NOT EXISTS ai_usage_logs (
+            id BIGSERIAL PRIMARY KEY,
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            endpoint TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model_name TEXT NOT NULL,
+            model_kind TEXT NOT NULL,
+            prompt_tokens INT NOT NULL DEFAULT 0,
+            completion_tokens INT NOT NULL DEFAULT 0,
+            total_tokens INT NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS ai_usage_logs_user_idx ON ai_usage_logs(user_id, created_at DESC);",
+        "CREATE INDEX IF NOT EXISTS ai_usage_logs_kind_idx ON ai_usage_logs(model_kind, created_at DESC);",
+        """
+        CREATE TABLE IF NOT EXISTS ai_token_quotas (
+            model_kind TEXT PRIMARY KEY,
+            total_tokens BIGINT NOT NULL DEFAULT 0,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        """,
+        """
+        INSERT INTO ai_token_quotas (model_kind, total_tokens)
+        VALUES ('text', 5000000)
+        ON CONFLICT (model_kind) DO UPDATE
+        SET total_tokens = EXCLUDED.total_tokens,
+            updated_at = now();
+        """,
+        """
+        INSERT INTO ai_token_quotas (model_kind, total_tokens)
+        VALUES ('image', 10000000)
+        ON CONFLICT (model_kind) DO UPDATE
+        SET total_tokens = EXCLUDED.total_tokens,
+            updated_at = now();
+        """,
     ]
 
     with get_connection() as conn, conn.cursor() as cur:

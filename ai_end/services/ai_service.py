@@ -557,10 +557,11 @@ class AIService:
         data = self._zhipu_chat_completion(
             messages,
             model=self.config.zhipu_vision_model,
+            model_kind="image",
             max_tokens=1400,
             response_format_type="json_object",
         )
-        return self._normalize_recipe_draft(data, hint_text=hint_text)
+        return self._copy_ai_meta(self._normalize_recipe_draft(data, hint_text=hint_text), data)
 
     def _extract_recipe_draft_with_openai(
         self,
@@ -592,9 +593,10 @@ class AIService:
         result = self._chat_completion(
             messages,
             schema=self._recipe_draft_schema(),
+            model_kind="image",
             max_tokens=1400,
         )
-        return self._normalize_recipe_draft(result, hint_text=hint_text)
+        return self._copy_ai_meta(self._normalize_recipe_draft(result, hint_text=hint_text), result)
 
     @staticmethod
     def _build_recipe_draft_prompt(hint_text: str | None) -> str:
@@ -723,6 +725,7 @@ class AIService:
         data = self._zhipu_chat_completion(
             messages,
             model=self.config.zhipu_vision_model,
+            model_kind="image",
             max_tokens=1200,
         )
         items = self._normalize_recognition_items(data.get("items") or [])
@@ -1558,6 +1561,430 @@ class AIService:
         if isinstance(value, (datetime, date)):
             return value.isoformat()
         return value
+
+
+    def _copy_ai_meta(self, target: dict[str, Any], source: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(source, dict):
+            return target
+        meta = source.get("_meta_ai")
+        if isinstance(meta, dict):
+            target["_meta_ai"] = meta
+        return target
+
+    @staticmethod
+    def _normalize_ai_usage(usage: Any) -> dict[str, int]:
+        if not isinstance(usage, dict):
+            return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        prompt_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+        completion_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+        total_tokens = int(usage.get("total_tokens") or (prompt_tokens + completion_tokens) or 0)
+        return {
+            "prompt_tokens": max(prompt_tokens, 0),
+            "completion_tokens": max(completion_tokens, 0),
+            "total_tokens": max(total_tokens, 0),
+        }
+
+    def _build_ai_meta(self, *, provider: str, model: str, model_kind: str, usage: Any) -> dict[str, Any]:
+        return {
+            "provider": provider,
+            "model": model,
+            "model_kind": model_kind,
+            "usage": self._normalize_ai_usage(usage),
+        }
+
+    def _zhipu_chat_completion(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        model: str,
+        model_kind: str,
+        max_tokens: int,
+        response_format_type: str | None = None,
+        retry_on_rate_limit: bool = True,
+    ) -> dict[str, Any]:
+        url = self._normalize_chat_completion_url(self.config.zhipu_base_url)
+        headers = {
+            "Authorization": f"Bearer {self.config.zhipu_api_key}",
+            "Content-Type": "application/json",
+        }
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "max_tokens": max_tokens,
+            "thinking": {"type": "disabled"},
+        }
+        if response_format_type:
+            payload["response_format"] = {"type": response_format_type}
+
+        provider = f"zhipu:{model}"
+        for attempt in range(len(ZHIPU_RETRY_DELAYS_SECONDS) + 1):
+            response = requests.post(url, headers=headers, json=payload, timeout=60)
+            try:
+                self._raise_for_status_with_details(response, provider=provider)
+            except requests.HTTPError:
+                if (
+                    not retry_on_rate_limit
+                    or not self._should_retry_zhipu_response(response)
+                    or attempt >= len(ZHIPU_RETRY_DELAYS_SECONDS)
+                ):
+                    raise
+                delay_seconds = ZHIPU_RETRY_DELAYS_SECONDS[attempt]
+                error_code = self._extract_error_code(response) or "unknown"
+                logger.warning(
+                    "%s transient error detected, retrying in %.1fs (attempt %s/%s, code=%s)",
+                    provider,
+                    delay_seconds,
+                    attempt + 1,
+                    len(ZHIPU_RETRY_DELAYS_SECONDS),
+                    error_code,
+                )
+                time.sleep(delay_seconds)
+                continue
+
+            data = response.json()
+            content = self._extract_message_content(((data.get("choices") or [{}])[0].get("message") or {}).get("content"))
+            parsed = self._load_json_object(content)
+            parsed["_meta_ai"] = self._build_ai_meta(
+                provider="zhipu",
+                model=model,
+                model_kind=model_kind,
+                usage=data.get("usage"),
+            )
+            return parsed
+
+        raise RuntimeError(f"{provider} request ended without a response")
+
+    def _chat_completion(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        schema: dict[str, Any],
+        model_kind: str,
+        max_tokens: int,
+    ) -> dict[str, Any]:
+        url = f"{self.config.openai_base_url.rstrip('/')}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.config.openai_api_key}",
+            "Content-Type": "application/json",
+        }
+        if self.config.openai_project_id:
+            headers["OpenAI-Project"] = self.config.openai_project_id
+        if self.config.openai_org_id:
+            headers["OpenAI-Organization"] = self.config.openai_org_id
+
+        response = requests.post(
+            url,
+            headers=headers,
+            json={
+                "model": self.config.openai_model,
+                "messages": messages,
+                "response_format": {"type": "json_schema", "json_schema": schema},
+                "max_tokens": max_tokens,
+            },
+            timeout=60,
+        )
+        self._raise_for_status_with_details(response, provider=f"openai:{self.config.openai_model}")
+        data = response.json()
+        content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "{}"
+        parsed = self._load_json_object(content)
+        parsed["_meta_ai"] = self._build_ai_meta(
+            provider="openai",
+            model=self.config.openai_model,
+            model_kind=model_kind,
+            usage=data.get("usage"),
+        )
+        return parsed
+
+    def _extract_recipe_draft_with_zhipu(
+        self,
+        *,
+        image_base64: str | None,
+        image_url: str | None,
+        hint_text: str | None,
+    ) -> dict[str, Any]:
+        data_url = image_url or self._build_image_data_url(image_base64)
+        if not data_url:
+            return self._build_empty_recipe_draft(hint_text=hint_text)
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是中文食谱整理助手。请根据食物图片识别菜品，并输出结构化食谱草稿。"
+                    "如果图片信息不完整，可以给出合理且保守的估计，但不要编造过细的营养数据。"
+                    "请严格返回 JSON 对象，不要输出解释。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": self._build_recipe_draft_prompt(hint_text)},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            },
+        ]
+        data = self._zhipu_chat_completion(
+            messages,
+            model=self.config.zhipu_vision_model,
+            model_kind="image",
+            max_tokens=1400,
+            response_format_type="json_object",
+        )
+        return self._copy_ai_meta(self._normalize_recipe_draft(data, hint_text=hint_text), data)
+
+    def _extract_recipe_draft_with_openai(
+        self,
+        *,
+        image_base64: str | None,
+        image_url: str | None,
+        hint_text: str | None,
+    ) -> dict[str, Any]:
+        data_url = image_url or self._build_image_data_url(image_base64)
+        if not data_url:
+            return self._build_empty_recipe_draft(hint_text=hint_text)
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是中文食谱整理助手。请根据食物图片识别菜品，并输出结构化食谱草稿。"
+                    "如果图片信息不完整，可以给出合理且保守的估计，但不要编造过细的营养数据。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": self._build_recipe_draft_prompt(hint_text)},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            },
+        ]
+        result = self._chat_completion(
+            messages,
+            schema=self._recipe_draft_schema(),
+            model_kind="image",
+            max_tokens=1400,
+        )
+        return self._copy_ai_meta(self._normalize_recipe_draft(result, hint_text=hint_text), result)
+
+    def _recognize_with_zhipu(
+        self,
+        *,
+        image_base64: str | None,
+        image_url: str | None,
+        hint_text: str | None,
+    ) -> dict[str, Any]:
+        data_url = image_url or self._build_image_data_url(image_base64)
+        if not data_url:
+            return {
+                "items": [],
+                "provider": "local",
+                "message": "缺少图片输入，无法调用视觉识别。",
+            }
+
+        messages = build_visual_recognition_messages(
+            catalog_lines=get_catalog_prompt_lines(),
+            image_url=data_url,
+            hint_text=hint_text,
+        )
+        data = self._zhipu_chat_completion(
+            messages,
+            model=self.config.zhipu_vision_model,
+            model_kind="image",
+            max_tokens=1200,
+        )
+        result = {
+            "items": self._normalize_recognition_items(data.get("items") or []),
+            "provider": "zhipu",
+            "scene_summary": data.get("scene_summary"),
+            "message": "已通过智谱视觉模型完成识别，请在保存前确认份量。",
+        }
+        return self._copy_ai_meta(result, data)
+
+    def _analyze_with_zhipu(self, payload: dict[str, Any]) -> dict[str, Any]:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是中文营养分析助手。请基于用户当餐或当天数据，输出简洁、可执行、"
+                    "适合中老年与慢病人群的建议。不要诊断疾病。"
+                    "请同时给出 0-100 的营养评分，综合考虑总量目标、蛋白/脂肪/碳水供能结构。"
+                    "请严格返回 JSON 对象，不要输出解释。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "请根据下面 JSON 给出营养总结。\n"
+                    "返回格式必须是 JSON 对象，结构如下："
+                    '{"score":0,"summary":"","strengths":[""],"risks":[""],"next_actions":[""]}\n'
+                    f"{json.dumps(self._prepare_for_json(payload), ensure_ascii=False)}"
+                ),
+            },
+        ]
+        result = self._zhipu_chat_completion(
+            messages,
+            model=self.config.zhipu_text_model,
+            model_kind="text",
+            max_tokens=900,
+            response_format_type="json_object",
+        )
+        return self._copy_ai_meta(self._normalize_analysis_result(result, payload), result)
+
+    def _analyze_with_openai(self, payload: dict[str, Any]) -> dict[str, Any]:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是中文营养分析助手。请基于用户当餐或当天数据，输出简洁、可执行、"
+                    "适合中老年与慢病人群的建议。不要诊断疾病。"
+                    "请同时给出 0-100 的营养评分，综合考虑总量目标、蛋白/脂肪/碳水供能结构。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "请根据下面 JSON 给出营养总结。\n"
+                    f"{json.dumps(self._prepare_for_json(payload), ensure_ascii=False)}"
+                ),
+            },
+        ]
+        schema = {
+            "name": "nutrition_analysis",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "score": {"type": "number"},
+                    "summary": {"type": "string"},
+                    "strengths": {"type": "array", "items": {"type": "string"}},
+                    "risks": {"type": "array", "items": {"type": "string"}},
+                    "next_actions": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["score", "summary", "strengths", "risks", "next_actions"],
+                "additionalProperties": False,
+            },
+        }
+        result = self._chat_completion(messages, schema=schema, model_kind="text", max_tokens=900)
+        return self._copy_ai_meta(self._normalize_analysis_result(result, payload), result)
+
+    def _recommend_with_zhipu(self, payload: dict[str, Any]) -> dict[str, Any]:
+        ai_payload = self._build_ai_recommendation_payload(payload)
+        messages = build_recipe_recommendation_messages(self._prepare_for_json(ai_payload))
+        data = self._zhipu_chat_completion(
+            messages,
+            model=self.config.zhipu_text_model,
+            model_kind="text",
+            max_tokens=500,
+            response_format_type="json_object",
+            retry_on_rate_limit=False,
+        )
+        candidates = ai_payload.get("recipes") or self._recommend_with_rules(payload)
+        by_name = self._build_recipe_candidate_lookup(ai_payload, candidates)
+        by_id = {
+            str(item.get("recipe_id") or item.get("id")): item
+            for item in candidates
+            if item.get("recipe_id") is not None or item.get("id") is not None
+        }
+        merged: list[dict[str, Any]] = []
+        for item in data.get("items") or []:
+            candidate = by_id.get(str(item.get("recipe_id"))) if item.get("recipe_id") is not None else None
+            candidate = candidate or by_name.get(self._normalize_recipe_name(item.get("name")), {})
+            merged.append({**candidate, **item})
+        selected = self._apply_recommendation_refresh(merged, payload)
+        return self._copy_ai_meta({"items": self._ensure_recommendation_source_mix(selected or candidates, payload)}, data)
+
+    def _recommend_with_openai(self, payload: dict[str, Any]) -> dict[str, Any]:
+        ai_payload = self._build_ai_recommendation_payload(payload)
+        messages = build_recipe_recommendation_messages(self._prepare_for_json(ai_payload))
+        schema = build_recipe_recommendation_schema()
+        data = self._chat_completion(messages, schema=schema, model_kind="text", max_tokens=500)
+        candidates = ai_payload.get("recipes") or self._recommend_with_rules(payload)
+        by_name = self._build_recipe_candidate_lookup(ai_payload, candidates)
+        by_id = {
+            str(item.get("recipe_id") or item.get("id")): item
+            for item in candidates
+            if item.get("recipe_id") is not None or item.get("id") is not None
+        }
+        merged: list[dict[str, Any]] = []
+        for item in data.get("items") or []:
+            candidate = by_id.get(str(item.get("recipe_id"))) if item.get("recipe_id") is not None else None
+            candidate = candidate or by_name.get(self._normalize_recipe_name(item.get("name")), {})
+            merged.append({**candidate, **item})
+        selected = self._apply_recommendation_refresh(merged, payload)
+        return self._copy_ai_meta({"items": self._ensure_recommendation_source_mix(selected or candidates, payload)}, data)
+
+    def recommend_recipes(self, payload: dict[str, Any]) -> dict[str, Any]:
+        rule_items = self._recommend_with_rules(payload)
+        if not self._should_enhance_recommendation_with_ai(payload):
+            return {
+                "items": self._finalize_recipe_items(rule_items, payload),
+                "provider": "rules",
+                "message": "已使用本地规则快速推荐，可按需启用 AI 增强推荐理由。",
+            }
+
+        if self.config.ai_recipe_recommend_url:
+            headers = {"Content-Type": "application/json"}
+            if self.config.ai_recipe_recommend_key:
+                headers["Authorization"] = f"Bearer {self.config.ai_recipe_recommend_key}"
+            response = requests.post(
+                self.config.ai_recipe_recommend_url,
+                json=payload,
+                headers=headers,
+                timeout=30,
+            )
+            response.raise_for_status()
+            data = response.json()
+            result = {
+                "items": self._finalize_recipe_items(data.get("items") or [], payload),
+                "provider": "remote",
+                "message": data.get("message"),
+            }
+            if isinstance(data, dict):
+                result["_meta_ai"] = self._build_ai_meta(
+                    provider="remote",
+                    model="remote-recommend",
+                    model_kind="text",
+                    usage=data.get("usage"),
+                )
+            return result
+
+        if self.config.zhipu_api_key:
+            try:
+                ai_result = self._recommend_with_zhipu(payload)
+                return {
+                    "items": ai_result.get("items") or [],
+                    "provider": "zhipu",
+                    "_meta_ai": ai_result.get("_meta_ai"),
+                }
+            except Exception as exc:  # pragma: no cover
+                return {
+                    "items": self._finalize_recipe_items(self._recommend_with_rules(payload), payload),
+                    "provider": "rules",
+                    "message": f"AI 推荐不可用，已切换为规则推荐: {exc}",
+                }
+
+        if self.config.openai_api_key:
+            try:
+                ai_result = self._recommend_with_openai(payload)
+                return {
+                    "items": ai_result.get("items") or [],
+                    "provider": "openai",
+                    "_meta_ai": ai_result.get("_meta_ai"),
+                }
+            except Exception as exc:  # pragma: no cover
+                return {
+                    "items": self._finalize_recipe_items(self._recommend_with_rules(payload), payload),
+                    "provider": "rules",
+                    "message": f"AI 推荐不可用，已切换为规则推荐: {exc}",
+                }
+
+        return {
+            "items": self._finalize_recipe_items(self._recommend_with_rules(payload), payload),
+            "provider": "rules",
+            "message": "未配置推荐服务，已使用本地规则推荐。",
+        }
 
 
 __all__ = ["AIService"]

@@ -52,7 +52,8 @@ export default function SettingsScreen() {
     avatar_url?: string | null;
   } | null>(null);
   const activeUserProfile = cachedUserProfile || userProfile;
-  const isAdmin = (activeUserProfile?.roles || []).includes('admin');
+  const roleSet = new Set(activeUserProfile?.roles || []);
+  const isAdmin = roleSet.has('admin') || roleSet.has('webmaster');
 
   const [profile, setProfile] = useState<HealthProfile>({});
   const [goals, setGoals] = useState<NutritionGoals>({});
@@ -263,6 +264,26 @@ export default function SettingsScreen() {
   const avatarUrl = activeUserProfile?.avatar_url || null;
   const avatarSeed = (activeUserProfile?.display_name || activeUserProfile?.phone || '我').trim();
   const avatarText = avatarSeed.slice(0, 1).toUpperCase();
+  const accountRoleMeta = roleSet.has('webmaster')
+    ? {
+        label: '站长',
+        textColor: palette.imperial600,
+        backgroundColor: palette.imperial50,
+        borderColor: palette.imperial100,
+      }
+    : roleSet.has('admin')
+    ? {
+        label: '管理员',
+        textColor: palette.gold600,
+        backgroundColor: palette.gold50,
+        borderColor: palette.gold200,
+      }
+    : {
+        label: '成员',
+        textColor: palette.stone600,
+        backgroundColor: palette.stone100,
+        borderColor: palette.stone200,
+      };
 
   const handleLogout = async () => {
     await clearAuthStorage();
@@ -293,9 +314,24 @@ export default function SettingsScreen() {
                 </View>
               </View>
               <View style={styles.accountHeroTextGroup}>
-                <Text style={styles.accountHeroTitle} numberOfLines={1}>
-                  {displayName}
-                </Text>
+                <View style={styles.accountHeroTitleRow}>
+                  <Text style={styles.accountHeroTitle} numberOfLines={1}>
+                    {displayName}
+                  </Text>
+                  <View
+                    style={[
+                      styles.accountRoleBadge,
+                      {
+                        backgroundColor: accountRoleMeta.backgroundColor,
+                        borderColor: accountRoleMeta.borderColor,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.accountRoleBadgeText, { color: accountRoleMeta.textColor }]}>
+                      {accountRoleMeta.label}
+                    </Text>
+                  </View>
+                </View>
                 <View style={styles.accountHeroBadge}>
                   <CheckCircle size={13} color={palette.orange500} weight="fill" />
                   <Text style={styles.accountHeroSubtitle}>账号信息</Text>
@@ -544,7 +580,7 @@ export default function SettingsScreen() {
           {isAdmin && (
             <>
               <Pressable style={styles.linkButton} onPress={() => router.push('/admin/health-rules')}>
-                <Text style={styles.linkButtonText}>管理健康禁忌</Text>
+                <Text style={styles.linkButtonText}>后台数据管理</Text>
                 <Text style={styles.linkArrow}>›</Text>
               </Pressable>
               <Pressable style={styles.linkButton} onPress={() => router.push('/admin/recipes')}>
@@ -733,10 +769,29 @@ function createStyles(palette: Palette) {
       marginRight: 8,
       gap: 6,
     },
+    accountHeroTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
     accountHeroTitle: {
       fontSize: 17,
       fontWeight: '800',
       color: palette.stone850,
+      flexShrink: 1,
+    },
+    accountRoleBadge: {
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderWidth: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    accountRoleBadgeText: {
+      fontSize: 11,
+      fontWeight: '800',
     },
     accountHeroSubtitle: {
       fontSize: 12,

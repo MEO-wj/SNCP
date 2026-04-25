@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -10,7 +10,11 @@ import { colors, Palette } from '@/constants/palette';
 import { useAuthToken } from '@/hooks/use-auth-token';
 import { usePalette } from '@/hooks/use-palette';
 import { fetchNutritionTrend } from '@/services/dashboard';
+import { readTrendExperienceCache, writeTrendExperienceCache } from '@/services/nutrition-cache';
 import type { NutritionTrendPoint } from '@/types/dashboard';
+
+const TREND_DAYS = 30;
+const FOCUS_REFRESH_INTERVAL_MS = 15_000;
 
 export default function TrendScreen() {
   const router = useRouter();
@@ -21,31 +25,101 @@ export default function TrendScreen() {
   const [trend, setTrend] = useState<NutritionTrendPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState('');
+  const latestTrendRef = useRef<NutritionTrendPoint[]>([]);
+  const bootstrappedRef = useRef(false);
+  const lastLoadAtRef = useRef(0);
 
-  const loadTrend = useCallback(async () => {
+  useEffect(() => {
+    latestTrendRef.current = trend;
+  }, [trend]);
+
+  const loadTrend = useCallback(
+    async (options?: { force?: boolean; silent?: boolean }) => {
+      if (!token) {
+        setTrend([]);
+        setErrorText('登录状态失效，请重新登录后再查看趋势。');
+        return;
+      }
+
+      const now = Date.now();
+      const shouldSkipFocusRefresh =
+        options?.silent &&
+        !options?.force &&
+        latestTrendRef.current.length > 0 &&
+        now - lastLoadAtRef.current < FOCUS_REFRESH_INTERVAL_MS;
+
+      if (shouldSkipFocusRefresh) {
+        return;
+      }
+
+      lastLoadAtRef.current = now;
+      if (!options?.silent) {
+        setLoading(true);
+      }
+
+      try {
+        const res = await fetchNutritionTrend(token, TREND_DAYS);
+        const nextTrend = sortTrendAscending(res.trend || []);
+        setTrend(nextTrend);
+        setErrorText('');
+        await writeTrendExperienceCache(TREND_DAYS, nextTrend);
+      } catch (error) {
+        console.error('[Trend] failed', error);
+        setErrorText(
+          latestTrendRef.current.length > 0
+            ? '当前显示的是最近一次缓存趋势，暂时无法连接后端，稍后再试。'
+            : error instanceof Error
+            ? error.message
+            : '趋势刷新失败，请稍后重试。',
+        );
+      } finally {
+        if (!options?.silent) {
+          setLoading(false);
+        }
+      }
+    },
+    [token],
+  );
+
+  useEffect(() => {
     if (!token) {
-      setTrend([]);
-      setErrorText('登录状态失效，请重新登录后再查看趋势。');
+      bootstrappedRef.current = false;
       return;
     }
-    setLoading(true);
-    try {
-      const res = await fetchNutritionTrend(token, 30);
-      setTrend(sortTrendAscending(res.trend || []));
-      setErrorText('');
-    } catch (error) {
-      console.error('[Trend] failed', error);
-      setErrorText(error instanceof Error ? error.message : '趋势刷新失败，请稍后重试。');
-    } finally {
-      setLoading(false);
-    }
-  }, [token]);
+
+    let cancelled = false;
+    void (async () => {
+      const cached = await readTrendExperienceCache(TREND_DAYS);
+      if (cancelled) {
+        return;
+      }
+
+      if (cached?.trend?.length) {
+        setTrend(sortTrendAscending(cached.trend));
+        setErrorText('');
+      }
+
+      bootstrappedRef.current = true;
+      void loadTrend({ force: true, silent: Boolean(cached?.trend?.length) });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadTrend, token]);
 
   useFocusEffect(
     useCallback(() => {
-      void loadTrend();
+      if (!bootstrappedRef.current) {
+        return;
+      }
+      void loadTrend({ silent: true });
     }, [loadTrend]),
   );
+
+  const handleRefresh = useCallback(() => {
+    void loadTrend({ force: true });
+  }, [loadTrend]);
 
   const overviewRatio = useMemo(() => {
     const totals = trend.reduce(
@@ -87,15 +161,11 @@ export default function TrendScreen() {
       <AmbientBackground variant="home" />
       <ScrollView
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadTrend} />}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={handleRefresh} />}
       >
         <Text style={styles.title}>长期趋势</Text>
         <View style={styles.dualChartRow}>
-          <MacroRatioCard
-            title="区间营养结构"
-            subtitle="近 30 天脂肪、蛋白、碳水供能占比"
-            ratio={overviewRatio}
-          />
+          <MacroRatioCard title="区间营养结构" subtitle="近 30 天脂肪、蛋白、碳水供能占比" ratio={overviewRatio} />
           <CaloriesTrendCard
             title="热量预览"
             subtitle="近 7 天摄入波动"
@@ -104,7 +174,7 @@ export default function TrendScreen() {
           />
         </View>
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>近30天热量趋势</Text>
+          <Text style={styles.cardTitle}>近 30 天热量趋势</Text>
           {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
           {historyRows.length === 0 ? (
             <Text style={styles.emptyText}>暂无趋势数据。</Text>
