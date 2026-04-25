@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -49,8 +50,15 @@ export default function AdminDashboardScreen() {
   const token = useAuthToken();
   const palette = usePalette();
   const colorScheme = useColorScheme();
+  const { width: windowWidth } = useWindowDimensions();
   const isDark = colorScheme === 'dark';
   const styles = useMemo(() => createStyles(palette, isDark), [isDark, palette]);
+  const metricCardWidth = useMemo(() => {
+    const screenHorizontalPadding = 40;
+    const panelHorizontalPadding = 36;
+    const columnGap = 12;
+    return Math.max((windowWidth - screenHorizontalPadding - panelHorizontalPadding - columnGap) / 2, 0);
+  }, [windowWidth]);
 
   const [dashboard, setDashboard] = useState<AdminDashboardResponse | null>(null);
   const [users, setUsers] = useState<AdminDashboardUser[]>([]);
@@ -254,7 +262,7 @@ export default function AdminDashboardScreen() {
                 {summaryMetrics.map((item) => {
                   const Icon = item.icon;
                   return (
-                    <View key={item.key} style={styles.metricCard}>
+                    <View key={item.key} style={[styles.metricCard, { width: metricCardWidth }]}>
                       <View style={[styles.metricIconWrap, { backgroundColor: item.accentBackground }]}>
                         <Icon size={18} color={item.accentColor} weight="fill" />
                       </View>
@@ -832,8 +840,6 @@ function createStyles(palette: Palette, isDark: boolean) {
       gap: 12,
     },
     metricCard: {
-      width: '47%',
-      minWidth: 148,
       borderRadius: 20,
       padding: 14,
       backgroundColor: insetSurface,

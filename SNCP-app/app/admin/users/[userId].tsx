@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -394,8 +395,16 @@ function MetricChip({
   icon: React.ReactNode;
   styles: ReturnType<typeof createStyles>;
 }) {
+  const { width: windowWidth } = useWindowDimensions();
+  const chipWidth = useMemo(() => {
+    const screenHorizontalPadding = 40;
+    const cardHorizontalPadding = 36;
+    const columnGap = 10;
+    return Math.max((windowWidth - screenHorizontalPadding - cardHorizontalPadding - columnGap) / 2, 0);
+  }, [windowWidth]);
+
   return (
-    <View style={styles.metricChip}>
+    <View style={[styles.metricChip, { width: chipWidth }]}>
       {icon}
       <View style={styles.metricTextWrap}>
         <Text style={styles.metricChipLabel}>{label}</Text>
@@ -816,8 +825,6 @@ function createStyles(palette: Palette) {
       gap: 10,
     },
     metricChip: {
-      width: '31%',
-      minWidth: 96,
       borderRadius: 16,
       paddingHorizontal: 12,
       paddingVertical: 12,
