@@ -37,6 +37,7 @@ class AuthResult:
 class AuthService:
     AVATAR_MAX_INPUT_BYTES = 4 * 1024 * 1024
     AVATAR_SIZE = 256
+    DISPLAY_NAME_MAX_UNITS = 15
     ADMIN_LOGIN_NAME = "admin"
     ADMIN_PHONE = "00000000000"
     ADMIN_DISPLAY_NAME = "管理员"
@@ -78,12 +79,13 @@ class AuthService:
             raise ValidationError("手机号已注册")
 
         hashed = self._hash_password(password)
+        normalized_display_name = self._normalize_display_name(display_name, fallback=normalized_phone)
         user = self.repo.create_with_password(
             phone=normalized_phone,
             password_hash=hashed,
             password_algo="bcrypt",
             password_cost=self._password_cost(),
-            display_name=display_name or normalized_phone,
+            display_name=normalized_display_name,
         )
         if self._is_webmaster_phone(normalized_phone):
             self.repo.update_roles(user.id, [self.WEBMASTER_ROLE, self.ADMIN_ROLE])
@@ -154,12 +156,7 @@ class AuthService:
         return self._issue_tokens(user, meta)
 
     def update_profile(self, user_id: UUID, display_name: str | None = None, avatar_image: str | None = None) -> User:
-        normalized_name = (display_name or "").strip()
-        if not normalized_name:
-            raise ValidationError("昵称不能为空")
-        if len(normalized_name) > 30:
-            raise ValidationError("昵称长度不能超过 30 个字符")
-
+        normalized_name = self._normalize_display_name(display_name)
         avatar_data = self._process_avatar_image(avatar_image) if avatar_image else None
         return self.repo.update_profile(user_id, normalized_name, avatar_data)
 
@@ -212,9 +209,12 @@ class AuthService:
         return payload
 
     def _login_admin(self, password: str) -> User:
-        if password != self.admin_password:
+        user = self._ensure_webmaster_user()
+        if not bcrypt.checkpw(password.encode("utf-8"), user.password_hash.encode("utf-8")):
             raise InvalidCredentialsError("invalid credentials")
+        return user
 
+    def _ensure_webmaster_user(self) -> User:
         try:
             user = self.repo.get_by_phone(self.admin_phone)
         except NotFoundError:
@@ -225,7 +225,6 @@ class AuthService:
                 password_cost=self._password_cost(),
                 display_name=self.admin_display_name,
             )
-
         required_roles = {self.WEBMASTER_ROLE, self.ADMIN_ROLE}
         if not required_roles.issubset(set(user.roles)):
             self.repo.update_roles(user.id, list({*user.roles, *required_roles}))
@@ -281,6 +280,20 @@ class AuthService:
     def _hash_password(self, password: str) -> str:
         hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=self._password_cost()))
         return hashed.decode("utf-8")
+
+    def _normalize_display_name(self, display_name: str | None, fallback: str | None = None) -> str:
+        normalized_name = (display_name or "").strip()
+        if not normalized_name:
+            if fallback is not None:
+                return fallback
+            raise ValidationError("昵称不能为空")
+        if self._display_name_units(normalized_name) > self.DISPLAY_NAME_MAX_UNITS:
+            raise ValidationError("昵称长度不能超过 15 个计量字符（汉字按 2 个字符计算）")
+        return normalized_name
+
+    @staticmethod
+    def _display_name_units(value: str) -> int:
+        return sum(1 if char.isascii() else 2 for char in value)
 
     def _process_avatar_image(self, image_payload: str) -> str:
         payload = (image_payload or "").strip()

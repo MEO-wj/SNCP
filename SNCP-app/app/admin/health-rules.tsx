@@ -1,12 +1,13 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -30,9 +31,15 @@ import {
   type AdminDashboardUser,
   type AdminDashboardUsersMeta,
 } from '@/services/admin-dashboard';
+import { trimDisplayNameToMax } from '@/utils/display-name';
 
 const DASHBOARD_DAYS = 7;
-const MAX_BAR_HEIGHT = 132;
+const MAX_LIQUID_HEIGHT = 112;
+const MIN_SINGLE_LIQUID_HEIGHT = 18;
+const MIN_STACK_LIQUID_HEIGHT = 34;
+const MIN_STACK_SEGMENT_HEIGHT = 14;
+const CHART_LIQUID_SEGMENT_GAP = 0;
+const MAX_BAR_HEIGHT = MAX_LIQUID_HEIGHT;
 const USER_PAGE_SIZE = 10;
 
 type SummaryMetric = {
@@ -50,15 +57,8 @@ export default function AdminDashboardScreen() {
   const token = useAuthToken();
   const palette = usePalette();
   const colorScheme = useColorScheme();
-  const { width: windowWidth } = useWindowDimensions();
   const isDark = colorScheme === 'dark';
   const styles = useMemo(() => createStyles(palette, isDark), [isDark, palette]);
-  const metricCardWidth = useMemo(() => {
-    const screenHorizontalPadding = 40;
-    const panelHorizontalPadding = 36;
-    const columnGap = 12;
-    return Math.max((windowWidth - screenHorizontalPadding - panelHorizontalPadding - columnGap) / 2, 0);
-  }, [windowWidth]);
 
   const [dashboard, setDashboard] = useState<AdminDashboardResponse | null>(null);
   const [users, setUsers] = useState<AdminDashboardUser[]>([]);
@@ -178,6 +178,13 @@ export default function AdminDashboardScreen() {
       },
     ];
   }, [dashboard?.summary, palette.blue500, palette.green500, palette.imperial500, palette.orange500]);
+  const summaryMetricRows = useMemo(() => {
+    const rows: SummaryMetric[][] = [];
+    for (let index = 0; index < summaryMetrics.length; index += 2) {
+      rows.push(summaryMetrics.slice(index, index + 2));
+    }
+    return rows;
+  }, [summaryMetrics]);
 
   const emptyState = !loading && !dashboard;
 
@@ -259,19 +266,24 @@ export default function AdminDashboardScreen() {
               </View>
 
               <View style={styles.metricGrid}>
-                {summaryMetrics.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <View key={item.key} style={[styles.metricCard, { width: metricCardWidth }]}>
-                      <View style={[styles.metricIconWrap, { backgroundColor: item.accentBackground }]}>
-                        <Icon size={18} color={item.accentColor} weight="fill" />
-                      </View>
-                      <Text style={styles.metricValue}>{formatCompactNumber(item.value)}</Text>
-                      <Text style={styles.metricLabel}>{item.label}</Text>
-                      <Text style={styles.metricHint}>{item.hint}</Text>
-                    </View>
-                  );
-                })}
+                {summaryMetricRows.map((row, rowIndex) => (
+                  <View key={`summary-row-${rowIndex}`} style={styles.metricRow}>
+                    {row.map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <View key={item.key} style={styles.metricCard}>
+                          <View style={[styles.metricIconWrap, { backgroundColor: item.accentBackground }]}>
+                            <Icon size={18} color={item.accentColor} weight="fill" />
+                          </View>
+                          <Text style={styles.metricValue}>{formatCompactNumber(item.value)}</Text>
+                          <Text style={styles.metricLabel}>{item.label}</Text>
+                          <Text style={styles.metricHint}>{item.hint}</Text>
+                        </View>
+                      );
+                    })}
+                    {row.length < 2 ? <View style={styles.metricCardPlaceholder} /> : null}
+                  </View>
+                ))}
               </View>
             </View>
 
@@ -302,7 +314,7 @@ export default function AdminDashboardScreen() {
               palette={palette}
             />
 
-            <AiCallsChartCard points={dashboard.daily_ai_calls} styles={styles} palette={palette} />
+            <AiCallsLiquidChartCard points={dashboard.daily_ai_calls} styles={styles} palette={palette} />
 
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>用户列表</Text>
@@ -339,9 +351,8 @@ export default function AdminDashboardScreen() {
                     <View style={styles.userInfo}>
                       <View style={styles.userTitleRow}>
                         <Text style={styles.userName} numberOfLines={1}>
-                          {item.display_name || '未设置昵称'}
+                          {trimDisplayNameToMax(item.display_name || '') || '未设置昵称'}
                         </Text>
-                        <Text style={styles.userPhone}>{item.phone || '--'}</Text>
                       </View>
                       <View style={styles.userMetaRow}>
                         {resolveRoleLabels(item).map((roleLabel) => (
@@ -471,6 +482,257 @@ function TokenCard({
   );
 }
 
+function AiCallsLiquidChartCard({
+  points,
+  styles,
+  palette,
+}: {
+  points: AdminDashboardDailyAiCall[];
+  styles: ReturnType<typeof createStyles>;
+  palette: Palette;
+}) {
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+
+  const activePoint =
+    points.find((item) => item.key === activeKey) || points[points.length - 1] || null;
+  const maxValue = Math.max(...points.map((item) => item.total_calls), 1);
+
+  return (
+    <View style={[styles.panelCard, styles.chartCard]}>
+      <LinearGradient
+        colors={['rgba(255,140,66,0.10)', 'rgba(255,255,255,0.02)', 'rgba(106,142,174,0.10)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <View style={styles.chartOrbWarm} />
+      <View style={styles.chartOrbCool} />
+
+      <View style={styles.chartHeader}>
+        <View style={styles.chartHeaderTextWrap}>
+          <Text style={styles.sectionTitle}>AI 调用次数条形图</Text>
+          <Text style={styles.sectionHint}>点击玻璃柱可切换查看每天的文本 / 图像调用构成。</Text>
+        </View>
+        <View style={styles.chartSummaryBadge}>
+          <Text style={styles.chartSummaryValue}>{formatCompactNumber(activePoint?.total_calls ?? 0)}</Text>
+          <Text style={styles.chartSummaryLabel}>{activePoint?.label || '--'}</Text>
+        </View>
+      </View>
+
+      <View style={styles.chartLegendRow}>
+        <View style={styles.chartLegendItem}>
+          <View style={[styles.chartLegendDot, { backgroundColor: palette.orange500 }]} />
+          <Text style={styles.chartLegendText}>文本模型</Text>
+        </View>
+        <View style={styles.chartLegendItem}>
+          <View style={[styles.chartLegendDot, { backgroundColor: palette.blue500 }]} />
+          <Text style={styles.chartLegendText}>图像模型</Text>
+        </View>
+      </View>
+
+      {points.length === 0 ? (
+        <View style={styles.chartEmptyState}>
+          <Text style={styles.emptySubtitle}>暂无 AI 调用记录，后续使用识图、分析或推荐后会自动累积。</Text>
+        </View>
+      ) : (
+        <>
+          <View style={styles.chartBarsRow}>
+            {points.map((item) => {
+              const { totalHeight, imageHeight, textHeight } = resolveTubeLiquidHeights(item, maxValue);
+              const isActive = activePoint?.key === item.key;
+              return (
+                <Pressable
+                  key={item.key}
+                  style={styles.chartBarSlot}
+                  onPress={() => setActiveKey((current) => (current === item.key ? null : item.key))}
+                >
+                  <View style={[styles.chartBarTrack, isActive && styles.chartBarTrackActive]}>
+                    <LinearGradient
+                      colors={['rgba(255,255,255,0.32)', 'rgba(255,255,255,0.08)', 'rgba(255,255,255,0.02)']}
+                      start={{ x: 0.08, y: 0 }}
+                      end={{ x: 0.92, y: 1 }}
+                      style={styles.chartTubeGlassOverlay}
+                    />
+                    <View style={[styles.chartTubeGlow, isActive && styles.chartTubeGlowActive]} />
+                    {item.total_calls > 0 ? (
+                      <View style={[styles.chartLiquidColumn, { height: totalHeight }]}>
+                        {textHeight > 0 ? (
+                          <TubeLiquidSegment
+                            height={textHeight}
+                            colors={['#FF9D57', '#FF8C45', '#FF7B36']}
+                            shimmerColor="rgba(255,255,255,0.42)"
+                            edge={imageHeight > 0 ? 'top' : 'single'}
+                            styles={styles}
+                          />
+                        ) : null}
+                        {imageHeight > 0 ? (
+                          <TubeLiquidSegment
+                            height={imageHeight}
+                            colors={['#86A8CF', '#6F94BC', '#6287AE']}
+                            shimmerColor="rgba(255,255,255,0.34)"
+                            edge={textHeight > 0 ? 'bottom' : 'single'}
+                            styles={styles}
+                          />
+                        ) : null}
+                      </View>
+                    ) : (
+                      <View style={styles.chartZeroBar} />
+                    )}
+                    <LinearGradient
+                      colors={['rgba(255,255,255,0.24)', 'rgba(255,255,255,0.04)', 'transparent']}
+                      start={{ x: 0.05, y: 0 }}
+                      end={{ x: 0.95, y: 0 }}
+                      style={styles.chartTubeReflection}
+                    />
+                    <View style={[styles.chartTubeBaseGlow, isActive && styles.chartTubeBaseGlowActive]} />
+                  </View>
+                  <Text style={[styles.chartBarLabel, isActive && styles.chartBarLabelActive]}>{item.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <View style={styles.chartDetailRow}>
+            <View style={styles.chartDetailCard}>
+              <Text style={styles.chartDetailValue}>{formatCompactNumber(activePoint?.text_calls ?? 0)}</Text>
+              <Text style={styles.chartDetailLabel}>文本调用</Text>
+            </View>
+            <View style={styles.chartDetailCard}>
+              <Text style={styles.chartDetailValue}>{formatCompactNumber(activePoint?.image_calls ?? 0)}</Text>
+              <Text style={styles.chartDetailLabel}>图像调用</Text>
+            </View>
+            <View style={styles.chartDetailCard}>
+              <Text style={styles.chartDetailValue}>{formatCompactNumber(activePoint?.total_calls ?? 0)}</Text>
+              <Text style={styles.chartDetailLabel}>当日总量</Text>
+            </View>
+          </View>
+        </>
+      )}
+    </View>
+  );
+}
+
+function TubeLiquidSegment({
+  height,
+  colors,
+  shimmerColor,
+  edge,
+  styles,
+}: {
+  height: number;
+  colors: [string, string, string];
+  shimmerColor: string;
+  edge: 'single' | 'top' | 'bottom';
+  styles: ReturnType<typeof createStyles>;
+}) {
+  const shimmerProgress = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const shimmerAnimation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(shimmerProgress, {
+          toValue: 1,
+          duration: 2400 + Math.round(height * 2),
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(shimmerProgress, {
+          toValue: 0,
+          duration: 0,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+
+    shimmerAnimation.start();
+    return () => {
+      shimmerAnimation.stop();
+    };
+  }, [height, shimmerProgress]);
+
+  const shimmerTranslateY = shimmerProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [18, -(height + 30)],
+  });
+
+  const shimmerOpacity = shimmerProgress.interpolate({
+    inputRange: [0, 0.2, 0.6, 1],
+    outputRange: [0.08, 0.3, 0.14, 0.08],
+  });
+
+  return (
+    <View
+      style={[
+        styles.chartLiquidSegment,
+        edge === 'single' ? styles.chartLiquidSegmentSingle : null,
+        edge === 'top' ? styles.chartLiquidSegmentTop : null,
+        edge === 'bottom' ? styles.chartLiquidSegmentBottom : null,
+        { height },
+      ]}
+    >
+      <LinearGradient colors={colors} start={{ x: 0.2, y: 1 }} end={{ x: 0.82, y: 0 }} style={StyleSheet.absoluteFillObject} />
+      <LinearGradient
+        colors={['rgba(255,255,255,0.22)', 'rgba(255,255,255,0.06)', 'transparent']}
+        start={{ x: 0.16, y: 0 }}
+        end={{ x: 0.84, y: 1 }}
+        style={styles.chartLiquidDepth}
+      />
+      {edge !== 'bottom' ? <View style={styles.chartLiquidSurfaceLine} /> : null}
+      <Animated.View
+        style={[
+          styles.chartLiquidShimmer,
+          {
+            backgroundColor: shimmerColor,
+            opacity: shimmerOpacity,
+            transform: [{ translateY: shimmerTranslateY }, { rotate: '12deg' }],
+          },
+        ]}
+      />
+      <View style={styles.chartLiquidBubbleSmall} />
+      <View style={styles.chartLiquidBubbleLarge} />
+    </View>
+  );
+}
+
+function resolveTubeLiquidHeights(point: AdminDashboardDailyAiCall, maxValue: number) {
+  const hasText = point.text_calls > 0;
+  const hasImage = point.image_calls > 0;
+  const needsStack = hasText && hasImage;
+
+  if (point.total_calls <= 0) {
+    return { totalHeight: 0, textHeight: 0, imageHeight: 0 };
+  }
+
+  const minLiquidHeight = needsStack ? MIN_STACK_LIQUID_HEIGHT : MIN_SINGLE_LIQUID_HEIGHT;
+  const totalHeight = Math.max((point.total_calls / maxValue) * MAX_LIQUID_HEIGHT, minLiquidHeight);
+  const usableHeight = totalHeight - (needsStack ? CHART_LIQUID_SEGMENT_GAP : 0);
+
+  if (!needsStack) {
+    return {
+      totalHeight,
+      textHeight: hasText ? usableHeight : 0,
+      imageHeight: hasImage ? usableHeight : 0,
+    };
+  }
+
+  const imageRatio = point.total_calls > 0 ? point.image_calls / point.total_calls : 0;
+  let imageHeight = Math.max(usableHeight * imageRatio, MIN_STACK_SEGMENT_HEIGHT);
+  let textHeight = Math.max(usableHeight - imageHeight, MIN_STACK_SEGMENT_HEIGHT);
+
+  const overflow = textHeight + imageHeight - usableHeight;
+  if (overflow > 0) {
+    if (textHeight >= imageHeight) {
+      textHeight = Math.max(MIN_STACK_SEGMENT_HEIGHT, textHeight - overflow);
+    } else {
+      imageHeight = Math.max(MIN_STACK_SEGMENT_HEIGHT, imageHeight - overflow);
+    }
+  }
+
+  return { totalHeight, textHeight, imageHeight };
+}
+
+void AiCallsChartCard;
+
 function AiCallsChartCard({
   points,
   styles,
@@ -483,10 +745,7 @@ function AiCallsChartCard({
   const [activeKey, setActiveKey] = useState<string | null>(null);
 
   const activePoint =
-    points.find((item) => item.key === activeKey) ||
-    [...points].reverse().find((item) => item.total_calls > 0) ||
-    points[points.length - 1] ||
-    null;
+    points.find((item) => item.key === activeKey) || points[points.length - 1] || null;
   const maxValue = Math.max(...points.map((item) => item.total_calls), 1);
 
   return (
@@ -835,17 +1094,23 @@ function createStyles(palette: Palette, isDark: boolean) {
       color: palette.stone500,
     },
     metricGrid: {
+      gap: 12,
+    },
+    metricRow: {
       flexDirection: 'row',
-      flexWrap: 'wrap',
       gap: 12,
     },
     metricCard: {
+      flex: 1,
       borderRadius: 20,
       padding: 14,
       backgroundColor: insetSurface,
       borderWidth: 1,
       borderColor: panelBorder,
       gap: 8,
+    },
+    metricCardPlaceholder: {
+      flex: 1,
     },
     metricIconWrap: {
       width: 38,
@@ -994,6 +1259,25 @@ function createStyles(palette: Palette, isDark: boolean) {
     },
     chartCard: {
       gap: 16,
+      position: 'relative',
+    },
+    chartOrbWarm: {
+      position: 'absolute',
+      top: -26,
+      right: 36,
+      width: 120,
+      height: 120,
+      borderRadius: 60,
+      backgroundColor: 'rgba(255, 140, 66, 0.10)',
+    },
+    chartOrbCool: {
+      position: 'absolute',
+      left: -18,
+      bottom: 48,
+      width: 88,
+      height: 88,
+      borderRadius: 44,
+      backgroundColor: 'rgba(106, 142, 174, 0.10)',
     },
     chartHeader: {
       flexDirection: 'row',
@@ -1049,31 +1333,138 @@ function createStyles(palette: Palette, isDark: boolean) {
       alignItems: 'flex-end',
       justifyContent: 'space-between',
       gap: 10,
-      minHeight: 170,
-      paddingTop: 8,
+      minHeight: 186,
+      paddingTop: 12,
     },
     chartBarSlot: {
       flex: 1,
       alignItems: 'center',
-      gap: 10,
+      gap: 12,
     },
     chartBarTrack: {
       width: '100%',
-      maxWidth: 34,
-      height: 150,
-      borderRadius: 18,
-      backgroundColor: insetSurface,
+      maxWidth: 40,
+      height: 160,
+      borderRadius: 20,
+      backgroundColor: strongerSurface,
       borderWidth: 1,
       borderColor: panelBorder,
       overflow: 'hidden',
+      position: 'relative',
       justifyContent: 'flex-end',
-      padding: 4,
-      gap: 4,
+      paddingHorizontal: 5,
+      paddingVertical: 6,
     },
     chartBarTrackActive: {
-      backgroundColor: orangeTint,
       borderColor: 'rgba(255,140,66,0.24)',
       transform: [{ translateY: -4 }],
+      shadowColor: '#FF8C45',
+      shadowOpacity: 0.18,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 6 },
+    },
+    chartTubeGlassOverlay: {
+      ...StyleSheet.absoluteFillObject,
+    },
+    chartTubeGlow: {
+      position: 'absolute',
+      left: 5,
+      right: 5,
+      bottom: 6,
+      height: 42,
+      borderRadius: 999,
+      backgroundColor: 'rgba(255, 140, 66, 0.06)',
+      opacity: 0.45,
+    },
+    chartTubeGlowActive: {
+      opacity: 0.82,
+      backgroundColor: 'rgba(255, 140, 66, 0.10)',
+    },
+    chartLiquidColumn: {
+      width: '100%',
+      justifyContent: 'flex-end',
+      gap: 0,
+      borderRadius: 14,
+      overflow: 'hidden',
+    },
+    chartLiquidSegment: {
+      width: '100%',
+      overflow: 'hidden',
+      position: 'relative',
+    },
+    chartLiquidSegmentSingle: {
+      borderRadius: 14,
+    },
+    chartLiquidSegmentTop: {
+      borderTopLeftRadius: 14,
+      borderTopRightRadius: 14,
+      borderBottomLeftRadius: 0,
+      borderBottomRightRadius: 0,
+    },
+    chartLiquidSegmentBottom: {
+      borderTopLeftRadius: 0,
+      borderTopRightRadius: 0,
+      borderBottomLeftRadius: 14,
+      borderBottomRightRadius: 14,
+      marginTop: -1,
+    },
+    chartLiquidDepth: {
+      ...StyleSheet.absoluteFillObject,
+    },
+    chartLiquidSurfaceLine: {
+      position: 'absolute',
+      left: 3,
+      right: 3,
+      top: 3,
+      height: 5,
+      borderRadius: 999,
+      backgroundColor: 'rgba(255,255,255,0.22)',
+    },
+    chartLiquidShimmer: {
+      position: 'absolute',
+      left: -4,
+      right: -4,
+      height: 22,
+      borderRadius: 999,
+    },
+    chartLiquidBubbleSmall: {
+      position: 'absolute',
+      right: 7,
+      bottom: 8,
+      width: 4,
+      height: 4,
+      borderRadius: 999,
+      backgroundColor: 'rgba(255,255,255,0.22)',
+    },
+    chartLiquidBubbleLarge: {
+      position: 'absolute',
+      left: 8,
+      bottom: 15,
+      width: 6,
+      height: 6,
+      borderRadius: 999,
+      backgroundColor: 'rgba(255,255,255,0.14)',
+    },
+    chartTubeReflection: {
+      position: 'absolute',
+      top: 8,
+      bottom: 8,
+      left: 5,
+      width: 10,
+      borderRadius: 999,
+      opacity: 0.9,
+    },
+    chartTubeBaseGlow: {
+      position: 'absolute',
+      left: '20%',
+      right: '20%',
+      bottom: 8,
+      height: 7,
+      borderRadius: 999,
+      backgroundColor: 'rgba(255, 199, 148, 0.22)',
+    },
+    chartTubeBaseGlowActive: {
+      backgroundColor: 'rgba(255, 159, 67, 0.32)',
     },
     chartTextBar: {
       width: '100%',
@@ -1087,9 +1478,9 @@ function createStyles(palette: Palette, isDark: boolean) {
     },
     chartZeroBar: {
       width: '100%',
-      height: 6,
+      height: 8,
       borderRadius: 999,
-      backgroundColor: subtleSurface,
+      backgroundColor: 'rgba(255, 215, 185, 0.56)',
     },
     chartBarLabel: {
       fontSize: 11,
@@ -1174,7 +1565,6 @@ function createStyles(palette: Palette, isDark: boolean) {
     userTitleRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
       gap: 10,
     },
     userName: {
@@ -1182,11 +1572,6 @@ function createStyles(palette: Palette, isDark: boolean) {
       fontSize: 16,
       fontWeight: '800',
       color: palette.stone900,
-    },
-    userPhone: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: palette.stone500,
     },
     userMetaRow: {
       flexDirection: 'row',

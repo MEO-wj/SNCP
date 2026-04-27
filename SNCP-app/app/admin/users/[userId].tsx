@@ -6,7 +6,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -42,6 +41,8 @@ import {
   revokeAdminUser,
   type AdminDashboardUserDetailResponse,
 } from '@/services/admin-dashboard';
+
+const NO_CHRONIC_DISEASE_LABEL = '无慢性病';
 
 export default function AdminUserDetailScreen() {
   const router = useRouter();
@@ -136,12 +137,15 @@ export default function AdminUserDetailScreen() {
   const roleMeta = resolveRoleMeta(user?.roles || [], palette);
   const avatarSeed = (user?.display_name || user?.phone || 'U').trim();
   const avatarText = avatarSeed.slice(0, 1).toUpperCase();
+  const chronicConditions = (profile.chronic_conditions || []).filter(Boolean);
+  const hasNoChronicDisease = chronicConditions.includes(NO_CHRONIC_DISEASE_LABEL);
+  const chronicConditionItems = chronicConditions.filter((item) => item !== NO_CHRONIC_DISEASE_LABEL);
   const healthSummary = [
     profile.gender ? `性别 ${profile.gender}` : '',
     profile.birth_year ? `${profile.birth_year}年生` : '',
     profile.height_cm ? `${profile.height_cm}cm` : '',
     profile.weight_kg ? `${profile.weight_kg}kg` : '',
-    (profile.chronic_conditions || []).length > 0 ? `慢病 ${(profile.chronic_conditions || []).join('、')}` : '',
+    chronicConditions.length > 0 ? `慢病 ${hasNoChronicDisease ? NO_CHRONIC_DISEASE_LABEL : chronicConditionItems.join('、')}` : '',
   ]
     .filter(Boolean)
     .join(' · ') || '未完善，点击填写';
@@ -336,7 +340,7 @@ export default function AdminUserDetailScreen() {
                 />
                 <MetricChip
                   label="慢病"
-                  value={(profile.chronic_conditions || []).length > 0 ? `${(profile.chronic_conditions || []).length} 项` : '未记录'}
+                  value={hasNoChronicDisease ? '无' : chronicConditionItems.length > 0 ? `${chronicConditionItems.length} 项` : '未记录'}
                   icon={<Heartbeat size={16} color={palette.orange500} weight="bold" />}
                   styles={styles}
                 />
@@ -395,20 +399,14 @@ function MetricChip({
   icon: React.ReactNode;
   styles: ReturnType<typeof createStyles>;
 }) {
-  const { width: windowWidth } = useWindowDimensions();
-  const chipWidth = useMemo(() => {
-    const screenHorizontalPadding = 40;
-    const cardHorizontalPadding = 36;
-    const columnGap = 10;
-    return Math.max((windowWidth - screenHorizontalPadding - cardHorizontalPadding - columnGap) / 2, 0);
-  }, [windowWidth]);
-
   return (
-    <View style={[styles.metricChip, { width: chipWidth }]}>
+    <View style={styles.metricChip}>
       {icon}
       <View style={styles.metricTextWrap}>
         <Text style={styles.metricChipLabel}>{label}</Text>
-        <Text style={styles.metricChipValue}>{value}</Text>
+        <Text style={styles.metricChipValue} numberOfLines={1}>
+          {value}
+        </Text>
       </View>
     </View>
   );
@@ -821,28 +819,33 @@ function createStyles(palette: Palette) {
     },
     metricGrid: {
       flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 10,
+      gap: 8,
     },
     metricChip: {
+      flex: 1,
+      minHeight: 58,
       borderRadius: 16,
-      paddingHorizontal: 12,
-      paddingVertical: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 10,
       backgroundColor: palette.surfaceWarm,
       borderWidth: 1,
       borderColor: palette.stone100,
+      flexDirection: 'row',
+      alignItems: 'center',
       gap: 8,
     },
     metricTextWrap: {
-      gap: 4,
+      flex: 1,
+      minWidth: 0,
+      gap: 2,
     },
     metricChipLabel: {
-      fontSize: 12,
+      fontSize: 11,
       color: palette.stone500,
       fontWeight: '700',
     },
     metricChipValue: {
-      fontSize: 16,
+      fontSize: 13,
       color: palette.stone850,
       fontWeight: '800',
     },

@@ -13,6 +13,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePalette } from '@/hooks/use-palette';
 import { changeMyPassword, fetchMyAccount, updateMyAccount } from '@/services/account';
 import { setUserProfileRaw } from '@/storage/auth-storage';
+import { DISPLAY_NAME_MAX_UNITS, getDisplayNameUnits, trimDisplayNameToMax } from '@/utils/display-name';
 
 export default function AccountDetailScreen() {
   const router = useRouter();
@@ -45,7 +46,7 @@ export default function AccountDetailScreen() {
     }
     fetchMyAccount(token)
       .then((res) => {
-        setDisplayName(res.display_name || '');
+        setDisplayName(trimDisplayNameToMax(res.display_name || ''));
         setPhone(res.phone || '');
         if (!hasPickedAvatarRef.current) {
           setAvatarUrl(res.avatar_url || null);
@@ -60,6 +61,7 @@ export default function AccountDetailScreen() {
   const avatarSeed = (displayName || phone || '我').trim();
   const avatarText = avatarSeed.slice(0, 1).toUpperCase();
   const displayAvatarUrl = avatarPreviewUrl || avatarUrl;
+  const displayNameUnits = getDisplayNameUnits(displayName.trim());
 
   const handlePickAvatar = async () => {
     setProfileErrorText('');
@@ -101,6 +103,10 @@ export default function AccountDetailScreen() {
     const nextName = displayName.trim();
     if (!nextName) {
       setProfileErrorText('昵称不能为空');
+      return;
+    }
+    if (getDisplayNameUnits(nextName) > DISPLAY_NAME_MAX_UNITS) {
+      setProfileErrorText('昵称最多 15 个计量字符，汉字按 2 个字符计算');
       return;
     }
 
@@ -217,14 +223,20 @@ export default function AccountDetailScreen() {
 
           <View style={styles.formRow}>
             <Text style={styles.formLabel}>昵称</Text>
-            <TextInput
-              value={displayName}
-              onChangeText={setDisplayName}
-              style={styles.formInput}
-              maxLength={30}
-              placeholder="请输入昵称"
-              placeholderTextColor={palette.stone400}
-            />
+            <View style={styles.formInputWithCounter}>
+              <TextInput
+                value={displayName}
+                onChangeText={(value) => setDisplayName(trimDisplayNameToMax(value))}
+                style={styles.formInputText}
+                placeholder="请输入昵称"
+                placeholderTextColor={palette.stone400}
+              />
+              <View style={styles.counterBadge}>
+                <Text style={styles.counterText}>
+                  {displayNameUnits}/{DISPLAY_NAME_MAX_UNITS}
+                </Text>
+              </View>
+            </View>
           </View>
 
           <Text style={styles.helperText}>当前支持修改头像、昵称和登录密码，手机号暂不支持修改。</Text>
@@ -414,9 +426,43 @@ function createStyles(palette: Palette, isDark: boolean) {
       color: palette.stone800,
       backgroundColor: palette.surfaceWarm,
     },
+    formInputWithCounter: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      borderWidth: 1,
+      borderColor: palette.stone200,
+      borderRadius: 12,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      backgroundColor: palette.surfaceWarm,
+    },
+    formInputText: {
+      flex: 1,
+      fontSize: 14,
+      color: palette.stone800,
+      paddingVertical: 0,
+    },
     disabledInput: {
       color: palette.stone500,
       backgroundColor: palette.stone100,
+    },
+    counterBadge: {
+      minWidth: 46,
+      height: 28,
+      paddingHorizontal: 10,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: palette.gold50,
+      borderWidth: 1,
+      borderColor: palette.gold100,
+    },
+    counterText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: palette.orange500,
     },
     helperText: {
       marginTop: 2,

@@ -37,6 +37,8 @@ import { fetchMyAccount } from '@/services/account';
 import { fetchGoals, fetchProfile } from '@/services/profile';
 import type { HealthProfile, NutritionGoals } from '@/types/profile';
 
+const NO_CHRONIC_DISEASE_LABEL = '无慢性病';
+
 export default function SettingsScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
@@ -201,12 +203,15 @@ export default function SettingsScreen() {
   );
 
   const healthSummary = useMemo(() => {
+    const chronicConditions = (profile.chronic_conditions || []).filter(Boolean);
+    const hasNoChronicDisease = chronicConditions.includes(NO_CHRONIC_DISEASE_LABEL);
+    const chronicConditionItems = chronicConditions.filter((item) => item !== NO_CHRONIC_DISEASE_LABEL);
     const values = [
       profile.gender ? `性别 ${profile.gender}` : '',
       profile.birth_year ? `${profile.birth_year}年生` : '',
       profile.height_cm ? `${profile.height_cm}cm` : '',
       profile.weight_kg ? `${profile.weight_kg}kg` : '',
-      (profile.chronic_conditions || []).length > 0 ? `慢性病 ${(profile.chronic_conditions || []).join('、')}` : '',
+      chronicConditions.length > 0 ? `慢性病 ${hasNoChronicDisease ? NO_CHRONIC_DISEASE_LABEL : chronicConditionItems.join('、')}` : '',
     ].filter(Boolean);
     return values.length > 0 ? values.join(' · ') : '未完善，点击填写';
   }, [profile]);
@@ -223,16 +228,21 @@ export default function SettingsScreen() {
 
   const hasCustomGoals = useMemo(() => hasConfiguredNutritionGoals(goals), [goals]);
   const healthMetricChips = useMemo(
-    () => [
-      { key: 'height', label: '身高', value: profile.height_cm ? `${profile.height_cm}cm` : '待填', icon: Ruler },
-      { key: 'weight', label: '体重', value: profile.weight_kg ? `${profile.weight_kg}kg` : '待填', icon: Scales },
-      {
-        key: 'condition',
-        label: '慢病',
-        value: (profile.chronic_conditions || []).length > 0 ? `${(profile.chronic_conditions || []).length} 项` : '未记录',
-        icon: Heartbeat,
-      },
-    ],
+    () => {
+      const chronicConditions = (profile.chronic_conditions || []).filter(Boolean);
+      const hasNoChronicDisease = chronicConditions.includes(NO_CHRONIC_DISEASE_LABEL);
+      const chronicConditionItems = chronicConditions.filter((item) => item !== NO_CHRONIC_DISEASE_LABEL);
+      return [
+        { key: 'height', label: '身高', value: profile.height_cm ? `${profile.height_cm}cm` : '待填', icon: Ruler },
+        { key: 'weight', label: '体重', value: profile.weight_kg ? `${profile.weight_kg}kg` : '待填', icon: Scales },
+        {
+          key: 'condition',
+          label: '慢病',
+          value: hasNoChronicDisease ? '无' : chronicConditionItems.length > 0 ? `${chronicConditionItems.length} 项` : '未记录',
+          icon: Heartbeat,
+        },
+      ];
+    },
     [profile],
   );
   const goalMetricChips = useMemo(

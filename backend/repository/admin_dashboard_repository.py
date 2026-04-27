@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, tzinfo
 from typing import Any
 from uuid import UUID
 
 from backend.db import db_session
+from backend.utils.timezone_context import local_date_span_to_utc_range, local_day_to_utc_range, to_local_date
 
 
 class AdminDashboardRepository:
@@ -56,27 +57,34 @@ class AdminDashboardRepository:
             )
             conn.commit()
 
-    def get_dashboard_snapshot(self, days: int = 7, users_limit: int = 10, users_offset: int = 0) -> dict[str, Any]:
+    def get_dashboard_snapshot(
+        self,
+        days: int = 7,
+        users_limit: int = 10,
+        users_offset: int = 0,
+        request_tz: tzinfo = timezone.utc,
+    ) -> dict[str, Any]:
         safe_days = max(int(days or 7), 1)
         safe_limit = max(int(users_limit or 10), 1)
         safe_offset = max(int(users_offset or 0), 0)
-        now = datetime.now(timezone.utc)
-        today_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc)
-        active_since = now - timedelta(days=30)
-        chart_start = today_start - timedelta(days=safe_days - 1)
+        today_local = datetime.now(request_tz).date()
+        today_start_utc, _ = local_day_to_utc_range(today_local, request_tz)
+        active_since_local = today_local - timedelta(days=29)
+        active_since_utc, _ = local_day_to_utc_range(active_since_local, request_tz)
+        chart_start_day = today_local - timedelta(days=safe_days - 1)
 
         quotas = self._get_token_quotas()
-        token_usage = self._get_token_usage()
+        token_usage = self._get_token_usage(today_start_utc)
         total_users = self._count_total_users()
         users = self._list_users(safe_limit, safe_offset)
 
         return {
             "summary": {
                 "total_users": total_users,
-                "active_users_30d": self._count_active_users_since(active_since),
-                "daily_active_users": self._count_active_users_since(today_start),
+                "active_users_30d": self._count_active_users_since(active_since_utc),
+                "daily_active_users": self._count_active_users_since(today_start_utc),
                 "ai_calls_total": self._count_ai_calls(),
-                "ai_calls_today": self._count_ai_calls(today_start),
+                "ai_calls_today": self._count_ai_calls(today_start_utc),
             },
             "tokens": {
                 kind: {
@@ -93,7 +101,7 @@ class AdminDashboardRepository:
                 }
                 for kind in ("text", "image")
             },
-            "daily_ai_calls": self._get_daily_ai_calls(chart_start, safe_days),
+            "daily_ai_calls": self._get_daily_ai_calls(chart_start_day, safe_days, request_tz),
             "users": users,
             "users_meta": {
                 "limit": safe_limit,
@@ -128,7 +136,7 @@ class AdminDashboardRepository:
             quotas[str(row.get("model_kind") or "")] = int(row.get("total_tokens") or 0)
         return quotas
 
-    def _get_token_usage(self) -> dict[str, dict[str, Any]]:
+    def _get_token_usage(self, today_start_utc: datetime) -> dict[str, dict[str, Any]]:
         baseline_used_total = {
             kind: max(self.DEFAULT_QUOTAS.get(kind, 0) - self.DEFAULT_REMAINING_BASELINE.get(kind, 0), 0)
             for kind in ("text", "image")
@@ -156,11 +164,12 @@ class AdminDashboardRepository:
                     model_kind,
                     COALESCE(SUM(total_tokens), 0) AS used_total,
                     COUNT(*) AS call_total,
-                    COALESCE(SUM(CASE WHEN created_at >= date_trunc('day', now()) THEN total_tokens ELSE 0 END), 0) AS used_today,
-                    COUNT(*) FILTER (WHERE created_at >= date_trunc('day', now())) AS call_today
+                    COALESCE(SUM(CASE WHEN created_at >= %s THEN total_tokens ELSE 0 END), 0) AS used_today,
+                    COUNT(*) FILTER (WHERE created_at >= %s) AS call_today
                 FROM ai_usage_logs
                 GROUP BY model_kind
-                """
+                """,
+                (today_start_utc, today_start_utc),
             )
             rows = cur.fetchall()
             cur.execute(
@@ -228,42 +237,51 @@ class AdminDashboardRepository:
             row = cur.fetchone() or {}
         return int(row.get("total") or 0)
 
-    def _get_daily_ai_calls(self, start_at: datetime, days: int) -> list[dict[str, Any]]:
+    def _get_daily_ai_calls(self, start_day: date, days: int, request_tz: tzinfo) -> list[dict[str, Any]]:
+        end_day = start_day + timedelta(days=days - 1)
+        start_utc, end_utc = local_date_span_to_utc_range(start_day, end_day, request_tz)
         with db_session() as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT
-                    DATE(created_at) AS day,
-                    COUNT(*) AS total_calls,
-                    COUNT(*) FILTER (WHERE model_kind = 'text') AS text_calls,
-                    COUNT(*) FILTER (WHERE model_kind = 'image') AS image_calls
+                    created_at,
+                    model_kind
                 FROM ai_usage_logs
-                WHERE created_at >= %s
-                GROUP BY DATE(created_at)
-                ORDER BY day ASC
+                WHERE created_at >= %s AND created_at < %s
+                ORDER BY created_at ASC
                 """,
-                (start_at,),
+                (start_utc, end_utc),
             )
             rows = cur.fetchall()
 
-        row_map = {
-            row["day"].isoformat() if isinstance(row.get("day"), date) else str(row.get("day")): row
-            for row in rows
-        }
         points: list[dict[str, Any]] = []
         for offset in range(days):
-            current_day = (start_at + timedelta(days=offset)).date()
-            key = current_day.isoformat()
-            row = row_map.get(key) or {}
+            current_day = start_day + timedelta(days=offset)
             points.append(
                 {
-                    "key": key,
+                    "key": current_day.isoformat(),
                     "label": current_day.strftime("%m/%d"),
-                    "total_calls": int(row.get("total_calls") or 0),
-                    "text_calls": int(row.get("text_calls") or 0),
-                    "image_calls": int(row.get("image_calls") or 0),
+                    "total_calls": 0,
+                    "text_calls": 0,
+                    "image_calls": 0,
                 }
             )
+
+        point_map = {point["key"]: point for point in points}
+        for row in rows:
+            created_at = row.get("created_at")
+            if not isinstance(created_at, datetime):
+                continue
+            key = to_local_date(created_at, request_tz).isoformat()
+            point = point_map.get(key)
+            if not point:
+                continue
+            point["total_calls"] += 1
+            model_kind = str(row.get("model_kind") or "")
+            if model_kind == "text":
+                point["text_calls"] += 1
+            elif model_kind == "image":
+                point["image_calls"] += 1
         return points
 
     def get_user_detail(self, user_id: UUID) -> dict[str, Any] | None:

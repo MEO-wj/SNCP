@@ -4,7 +4,7 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
-import { Camera, Plus, Trash } from 'phosphor-react-native';
+import { BookOpen, Camera, Plus, Trash } from 'phosphor-react-native';
 
 import { AmbientBackground } from '@/components/ambient-background';
 import { PageHeader } from '@/components/page-header';
@@ -718,17 +718,35 @@ export default function AdminRecipesScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>服务器库已有食谱</Text>
+          <View style={styles.libraryHeader}>
+            <Text style={styles.cardTitle}>服务器库已有食谱</Text>
+            <View style={styles.libraryCountBadge}>
+              <View style={styles.libraryCountIconWrap}>
+                <BookOpen size={16} color={palette.orange500} weight="bold" />
+              </View>
+              <View style={styles.libraryCountTextWrap}>
+                <Text style={styles.libraryCountLabel}>总数</Text>
+                <Text style={styles.libraryCountValue}>{managedRecipes.length}</Text>
+              </View>
+            </View>
+          </View>
           {managedRecipes.length === 0 ? (
             <Text style={styles.emptyText}>暂无服务器食谱。</Text>
           ) : (
-            managedRecipes.map((recipe) => (
+            managedRecipes.map((recipe, index) => (
               <View key={recipe.id} style={styles.recipeItem}>
-                <View style={styles.recipeTextGroup}>
-                  <Text style={styles.recipeName}>{recipe.name}</Text>
-                  <Text style={styles.recipeMeta}>
-                    {recipe.cuisine || '未分类'} · {(recipe.tags || []).join('、') || '无标签'}
-                  </Text>
+                <View style={styles.recipeMain}>
+                  <View style={styles.recipeIndexBadge}>
+                    <View style={styles.recipeIndexInner}>
+                      <Text style={styles.recipeIndexText}>{index + 1}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.recipeTextGroup}>
+                    <Text style={styles.recipeName}>{recipe.name}</Text>
+                    <Text style={styles.recipeMeta}>
+                      {recipe.cuisine || '未分类'} · {(recipe.tags || []).join('、') || '无标签'}
+                    </Text>
+                  </View>
                 </View>
                 <View style={styles.recipeActions}>
                   <Pressable style={styles.inlineActionButton} onPress={() => handleStartEdit(recipe)}>
@@ -858,6 +876,48 @@ function createStyles(palette: Palette) {
       fontSize: 18,
       fontWeight: '800',
       color: palette.stone900,
+    },
+    libraryHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    libraryCountBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 999,
+      backgroundColor: palette.gold50,
+      borderWidth: 1,
+      borderColor: palette.gold100,
+    },
+    libraryCountIconWrap: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: palette.white,
+      borderWidth: 1,
+      borderColor: palette.gold100,
+    },
+    libraryCountTextWrap: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: 6,
+    },
+    libraryCountLabel: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: palette.stone500,
+    },
+    libraryCountValue: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: palette.orange500,
     },
     sectionHeader: {
       flexDirection: 'row',
@@ -990,9 +1050,40 @@ function createStyles(palette: Palette) {
       justifyContent: 'space-between',
       gap: 12,
     },
+    recipeMain: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      minWidth: 0,
+    },
+    recipeIndexBadge: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: palette.gold50,
+      borderWidth: 1,
+      borderColor: palette.gold100,
+    },
+    recipeIndexInner: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: palette.white,
+    },
+    recipeIndexText: {
+      fontSize: 12,
+      fontWeight: '800',
+      color: palette.orange500,
+    },
     recipeTextGroup: {
       flex: 1,
       gap: 4,
+      minWidth: 0,
     },
     recipeName: {
       fontSize: 14,

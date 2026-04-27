@@ -11,6 +11,7 @@ from backend.repository.health_rule_repository import HealthRuleRepository
 from backend.repository.profile_repository import ProfileRepository
 from backend.repository.user_repository import NotFoundError, UserRepository
 from backend.routes.auth import admin_required, webmaster_required
+from backend.utils.timezone_context import resolve_request_tzinfo
 
 bp = Blueprint("admin", __name__)
 rule_repo = HealthRuleRepository()
@@ -42,7 +43,12 @@ def get_dashboard():
         users_limit = int(request.args.get("users_limit") or 10)
     except (TypeError, ValueError):
         users_limit = 10
-    snapshot = dashboard_repo.get_dashboard_snapshot(days=days, users_limit=users_limit, users_offset=0)
+    snapshot = dashboard_repo.get_dashboard_snapshot(
+        days=days,
+        users_limit=users_limit,
+        users_offset=0,
+        request_tz=resolve_request_tzinfo(request),
+    )
     return jsonify(snapshot), 200
 
 

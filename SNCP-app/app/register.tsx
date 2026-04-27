@@ -20,6 +20,7 @@ import { shadows } from '@/constants/shadows';
 import { getApiBaseUrl } from '@/services/api';
 import { setAuthToken } from '@/hooks/use-auth-token';
 import { setRefreshToken, setUserProfileRaw } from '@/storage/auth-storage';
+import { DISPLAY_NAME_MAX_UNITS, getDisplayNameUnits, trimDisplayNameToMax } from '@/utils/display-name';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -30,6 +31,7 @@ export default function RegisterScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const apiBaseUrl = getApiBaseUrl();
+  const displayNameUnits = getDisplayNameUnits(displayName.trim());
 
   const handleRegister = async () => {
     if (!phone.trim() || !password) {
@@ -110,11 +112,16 @@ export default function RegisterScreen() {
               <View style={styles.inputShell}>
                 <TextInput
                   value={displayName}
-                  onChangeText={setDisplayName}
+                  onChangeText={(value) => setDisplayName(trimDisplayNameToMax(value))}
                   placeholder="可填写姓名或称呼"
                   placeholderTextColor={colors.stone500}
                   style={styles.input}
                 />
+                <View style={styles.counterBadge}>
+                  <Text style={styles.counterText}>
+                    {displayNameUnits}/{DISPLAY_NAME_MAX_UNITS}
+                  </Text>
+                </View>
               </View>
             </View>
 
@@ -232,13 +239,33 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.85)',
     paddingHorizontal: 20,
     paddingVertical: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
     ...shadows.softSubtle,
   },
   input: {
+    flex: 1,
     height: 48,
     fontSize: 15,
     color: colors.stone900,
     fontWeight: '500',
+  },
+  counterBadge: {
+    minWidth: 46,
+    height: 28,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 140, 66, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 140, 66, 0.16)',
+  },
+  counterText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.orange500,
   },
   loginButton: {
     height: 64,
