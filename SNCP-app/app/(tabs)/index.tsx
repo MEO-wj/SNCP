@@ -263,7 +263,7 @@ function createStyles(palette: Palette) {
       backgroundColor: colors.surface,
     },
     content: {
-      paddingTop: 96,
+      paddingTop: 58,
       paddingHorizontal: 20,
       paddingBottom: 120,
       gap: 16,

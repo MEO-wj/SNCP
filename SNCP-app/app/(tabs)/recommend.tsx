@@ -46,8 +46,6 @@ function getProviderLabel(provider: string): string {
       return '本地规则';
     case 'remote':
       return '远程服务';
-    case 'openai':
-      return 'OpenAI';
     default:
       return provider;
   }
@@ -243,6 +241,7 @@ export default function RecommendScreen() {
         let nextErrorText = '';
 
         const aiResult = await recommendRecipes(token, {
+          ai_enhance: true,
           keyword: nextKeyword || undefined,
           exclude_names: options?.excludeNames?.length ? options.excludeNames : undefined,
           refresh_round: options?.refreshRound ?? 0,

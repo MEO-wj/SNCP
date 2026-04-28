@@ -53,6 +53,39 @@ def _image_payload_or_400(data: dict):
     return (image_base64, image_url, hint_text), None, None
 
 
+def _coerce_bool_flag(value, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return default
+    return normalized in {"1", "true", "yes", "on"}
+
+
+def _normalize_recommend_request_payload(data: dict) -> dict:
+    normalized = dict(data)
+    normalized["ai_enhance"] = _coerce_bool_flag(data.get("ai_enhance"), default=True)
+    return normalized
+
+
+def _should_bypass_recommend_cache(cached_result, request_payload: dict) -> bool:
+    if not isinstance(cached_result, dict):
+        return False
+    if not _coerce_bool_flag(request_payload.get("ai_enhance"), default=True):
+        return False
+    return str(cached_result.get("provider") or "").strip().lower() == "rules"
+
+
+def _should_cache_recommend_result(result, request_payload: dict) -> bool:
+    if not _coerce_bool_flag(request_payload.get("ai_enhance"), default=True):
+        return True
+    if not isinstance(result, dict):
+        return True
+    return str(result.get("provider") or "").strip().lower() not in {"rules", "local"}
+
+
 def _public_base_url() -> str:
     return request.host_url.rstrip("/")
 
@@ -270,13 +303,13 @@ def analyze_nutrition():
 @bp.route("/recommend", methods=["POST"])
 @login_required
 def recommend_recipes():
-    data = request.get_json(silent=True) or {}
+    data = _normalize_recommend_request_payload(request.get_json(silent=True) or {})
     user_id = get_request_user_id(request)
     state_version = get_user_state_version(user_id) if user_id else 0
     library_version = get_global_recipe_library_version()
     recommend_version = state_version * 1000000 + library_version
     cached_result = get_recipe_recommend_cache(user_id, recommend_version, data) if user_id else None
-    if cached_result is not None:
+    if cached_result is not None and not _should_bypass_recommend_cache(cached_result, data):
         return jsonify(_strip_private_fields(_normalize_recommend_result(cached_result))), 200
 
     profile = profile_repo.get_profile(user_id) if user_id else None
@@ -327,6 +360,6 @@ def recommend_recipes():
         user_id=user_id,
     )
     public_result = _strip_private_fields(_normalize_recommend_result(result))
-    if user_id:
+    if user_id and _should_cache_recommend_result(result, data):
         set_recipe_recommend_cache(user_id, recommend_version, data, public_result)
     return jsonify(public_result), 200

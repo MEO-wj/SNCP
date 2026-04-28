@@ -18,16 +18,14 @@ from ai_end.services.food_catalog_service import (
     get_catalog_prompt_lines,
     match_food_entry,
 )
-from ai_end.skills.recipe_recommendation_skill import (
-    build_recipe_recommendation_messages,
-    build_recipe_recommendation_schema,
-)
+from ai_end.skills.recipe_recommendation_skill import build_recipe_recommendation_messages
 from ai_end.skills.recognition_skill import build_visual_recognition_messages
 
 logger = logging.getLogger(__name__)
 
 ZHIPU_RETRYABLE_ERROR_CODES = {"1302", "1305"}
 ZHIPU_RETRY_DELAYS_SECONDS = (1.0, 2.0)
+RECOMMEND_AI_TIMEOUT_SECONDS = 12
 
 
 class AIService:
@@ -82,24 +80,6 @@ class AIService:
                     "message": f"智谱视觉识别暂时不可用，请稍后重试: {exc}",
                 }
 
-        if self.config.openai_api_key and (image_base64 or image_url):
-            try:
-                return self._recognize_with_openai(image_base64=image_base64, image_url=image_url, hint_text=hint_text)
-            except Exception as exc:  # pragma: no cover
-                local_items = build_local_hint_matches(hint_text)
-                if local_items:
-                    return {
-                        "items": local_items,
-                        "provider": "local",
-                        "message": f"视觉识别暂时不可用，已根据提示词给出近似匹配结果: {exc}",
-                        "scene_summary": hint_text or "",
-                    }
-                return {
-                    "items": [],
-                    "provider": "local",
-                    "message": f"视觉识别暂时不可用，请稍后重试: {exc}",
-                }
-
         local_items = build_local_hint_matches(hint_text)
         if local_items:
             return {
@@ -136,21 +116,6 @@ class AIService:
             except Exception as exc:  # pragma: no cover
                 logger.warning("extract recipe draft with zhipu failed: %s", exc)
 
-        if self.config.openai_api_key and (image_base64 or image_url):
-            try:
-                recipe = self._extract_recipe_draft_with_openai(
-                    image_base64=image_base64,
-                    image_url=image_url,
-                    hint_text=hint_text,
-                )
-                return {
-                    "recipe": recipe,
-                    "provider": "openai",
-                    "message": "已根据图片生成食谱草稿，请继续核对食材、步骤和标签。",
-                }
-            except Exception as exc:  # pragma: no cover
-                logger.warning("extract recipe draft with openai failed: %s", exc)
-
         return {
             "recipe": self._build_empty_recipe_draft(hint_text=hint_text),
             "provider": "local",
@@ -174,16 +139,6 @@ class AIService:
         if self.config.zhipu_api_key:
             try:
                 return {"analysis": self._analyze_with_zhipu(payload), "provider": "zhipu"}
-            except Exception as exc:  # pragma: no cover
-                return {
-                    "analysis": self._build_local_analysis(payload),
-                    "provider": "local",
-                    "message": f"AI 分析不可用，已切换为规则分析: {exc}",
-                }
-
-        if self.config.openai_api_key:
-            try:
-                return {"analysis": self._analyze_with_openai(payload), "provider": "openai"}
             except Exception as exc:  # pragma: no cover
                 return {
                     "analysis": self._build_local_analysis(payload),
@@ -237,19 +192,6 @@ class AIService:
                     "message": f"AI 推荐不可用，已切换为规则推荐: {exc}",
                 }
 
-        if self.config.openai_api_key:
-            try:
-                return {
-                    "items": self._finalize_recipe_items(self._recommend_with_openai(payload), payload),
-                    "provider": "openai",
-                }
-            except Exception as exc:  # pragma: no cover
-                return {
-                    "items": self._finalize_recipe_items(self._recommend_with_rules(payload), payload),
-                    "provider": "rules",
-                    "message": f"AI 推荐不可用，已切换为规则推荐: {exc}",
-                }
-
         return {
             "items": self._finalize_recipe_items(self._recommend_with_rules(payload), payload),
             "provider": "rules",
@@ -259,10 +201,17 @@ class AIService:
     @staticmethod
     def _should_enhance_recommendation_with_ai(payload: dict[str, Any]) -> bool:
         context = payload.get("context") or {}
+        if "ai_enhance" not in context:
+            return True
         value = context.get("ai_enhance")
+        if value is None:
+            return True
         if isinstance(value, bool):
             return value
-        return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+        normalized = str(value).strip().lower()
+        if not normalized:
+            return True
+        return normalized in {"1", "true", "yes", "on"}
 
     def _build_ai_recommendation_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         context = payload.get("context") or {}
@@ -563,41 +512,6 @@ class AIService:
         )
         return self._copy_ai_meta(self._normalize_recipe_draft(data, hint_text=hint_text), data)
 
-    def _extract_recipe_draft_with_openai(
-        self,
-        *,
-        image_base64: str | None,
-        image_url: str | None,
-        hint_text: str | None,
-    ) -> dict[str, Any]:
-        data_url = image_url or self._build_image_data_url(image_base64)
-        if not data_url:
-            return self._build_empty_recipe_draft(hint_text=hint_text)
-
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是中文食谱整理助手。请根据食物图片识别菜品，并输出结构化食谱草稿。"
-                    "如果图片信息不完整，可以给出合理且保守的估计，但不要编造过细的营养数据。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": self._build_recipe_draft_prompt(hint_text)},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ],
-            },
-        ]
-        result = self._chat_completion(
-            messages,
-            schema=self._recipe_draft_schema(),
-            model_kind="image",
-            max_tokens=1400,
-        )
-        return self._copy_ai_meta(self._normalize_recipe_draft(result, hint_text=hint_text), result)
-
     @staticmethod
     def _build_recipe_draft_prompt(hint_text: str | None) -> str:
         hint = str(hint_text or "").strip()
@@ -785,44 +699,6 @@ class AIService:
         )
         return self._normalize_analysis_result(result, payload)
 
-    def _analyze_with_openai(self, payload: dict[str, Any]) -> dict[str, Any]:
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是中文营养分析助手。请基于用户当餐或当天数据，输出简洁、可执行、"
-                    "适合中老年与慢病人群的建议。不要诊断疾病。"
-                    "请同时给出 0-100 的营养评分，综合考虑总量目标、蛋白/脂肪/碳水供能结构、"
-                    "是否存在脂肪占比偏高或蛋白不足等问题。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    "请根据下面 JSON 给出营养总结。\n"
-                    f"{json.dumps(self._prepare_for_json(payload), ensure_ascii=False)}"
-                ),
-            },
-        ]
-        schema = {
-            "name": "nutrition_analysis",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "score": {"type": "number"},
-                    "summary": {"type": "string"},
-                    "strengths": {"type": "array", "items": {"type": "string"}},
-                    "risks": {"type": "array", "items": {"type": "string"}},
-                    "next_actions": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["score", "summary", "strengths", "risks", "next_actions"],
-                "additionalProperties": False,
-            },
-        }
-        result = self._chat_completion(messages, schema=schema, max_tokens=900)
-        return self._normalize_analysis_result(result, payload)
-
     def _build_local_analysis(self, payload: dict[str, Any]) -> dict[str, Any]:
         totals = payload.get("totals") or {}
         goal_checks = payload.get("goal_checks") or []
@@ -940,26 +816,6 @@ class AIService:
             response_format_type="json_object",
             retry_on_rate_limit=False,
         )
-        candidates = ai_payload.get("recipes") or self._recommend_with_rules(payload)
-        by_name = self._build_recipe_candidate_lookup(ai_payload, candidates)
-        by_id = {
-            str(item.get("recipe_id") or item.get("id")): item
-            for item in candidates
-            if item.get("recipe_id") is not None or item.get("id") is not None
-        }
-        merged: list[dict[str, Any]] = []
-        for item in data.get("items") or []:
-            candidate = by_id.get(str(item.get("recipe_id"))) if item.get("recipe_id") is not None else None
-            candidate = candidate or by_name.get(self._normalize_recipe_name(item.get("name")), {})
-            merged.append({**candidate, **item})
-        selected = self._apply_recommendation_refresh(merged, payload)
-        return self._ensure_recommendation_source_mix(selected or candidates, payload)
-
-    def _recommend_with_openai(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
-        ai_payload = self._build_ai_recommendation_payload(payload)
-        messages = build_recipe_recommendation_messages(self._prepare_for_json(ai_payload))
-        schema = build_recipe_recommendation_schema()
-        data = self._chat_completion(messages, schema=schema, max_tokens=500)
         candidates = ai_payload.get("recipes") or self._recommend_with_rules(payload)
         by_name = self._build_recipe_candidate_lookup(ai_payload, candidates)
         by_id = {
@@ -1376,39 +1232,6 @@ class AIService:
 
         raise RuntimeError(f"{provider} request ended without a response")
 
-    def _chat_completion(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        schema: dict[str, Any],
-        max_tokens: int,
-    ) -> dict[str, Any]:
-        url = f"{self.config.openai_base_url.rstrip('/')}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.config.openai_api_key}",
-            "Content-Type": "application/json",
-        }
-        if self.config.openai_project_id:
-            headers["OpenAI-Project"] = self.config.openai_project_id
-        if self.config.openai_org_id:
-            headers["OpenAI-Organization"] = self.config.openai_org_id
-
-        response = requests.post(
-            url,
-            headers=headers,
-            json={
-                "model": self.config.openai_model,
-                "messages": messages,
-                "response_format": {"type": "json_schema", "json_schema": schema},
-                "max_tokens": max_tokens,
-            },
-            timeout=60,
-        )
-        self._raise_for_status_with_details(response, provider=f"openai:{self.config.openai_model}")
-        data = response.json()
-        content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "{}"
-        return self._load_json_object(content)
-
     @staticmethod
     def _strip_private_fields(item: dict[str, Any]) -> dict[str, Any]:
         return {key: value for key, value in item.items() if not key.startswith("_")}
@@ -1601,6 +1424,7 @@ class AIService:
         max_tokens: int,
         response_format_type: str | None = None,
         retry_on_rate_limit: bool = True,
+        timeout_seconds: int = 60,
     ) -> dict[str, Any]:
         url = self._normalize_chat_completion_url(self.config.zhipu_base_url)
         headers = {
@@ -1619,7 +1443,7 @@ class AIService:
 
         provider = f"zhipu:{model}"
         for attempt in range(len(ZHIPU_RETRY_DELAYS_SECONDS) + 1):
-            response = requests.post(url, headers=headers, json=payload, timeout=60)
+            response = requests.post(url, headers=headers, json=payload, timeout=timeout_seconds)
             try:
                 self._raise_for_status_with_details(response, provider=provider)
             except requests.HTTPError:
@@ -1654,47 +1478,6 @@ class AIService:
             return parsed
 
         raise RuntimeError(f"{provider} request ended without a response")
-
-    def _chat_completion(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        schema: dict[str, Any],
-        model_kind: str,
-        max_tokens: int,
-    ) -> dict[str, Any]:
-        url = f"{self.config.openai_base_url.rstrip('/')}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.config.openai_api_key}",
-            "Content-Type": "application/json",
-        }
-        if self.config.openai_project_id:
-            headers["OpenAI-Project"] = self.config.openai_project_id
-        if self.config.openai_org_id:
-            headers["OpenAI-Organization"] = self.config.openai_org_id
-
-        response = requests.post(
-            url,
-            headers=headers,
-            json={
-                "model": self.config.openai_model,
-                "messages": messages,
-                "response_format": {"type": "json_schema", "json_schema": schema},
-                "max_tokens": max_tokens,
-            },
-            timeout=60,
-        )
-        self._raise_for_status_with_details(response, provider=f"openai:{self.config.openai_model}")
-        data = response.json()
-        content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "{}"
-        parsed = self._load_json_object(content)
-        parsed["_meta_ai"] = self._build_ai_meta(
-            provider="openai",
-            model=self.config.openai_model,
-            model_kind=model_kind,
-            usage=data.get("usage"),
-        )
-        return parsed
 
     def _extract_recipe_draft_with_zhipu(
         self,
@@ -1732,41 +1515,6 @@ class AIService:
             response_format_type="json_object",
         )
         return self._copy_ai_meta(self._normalize_recipe_draft(data, hint_text=hint_text), data)
-
-    def _extract_recipe_draft_with_openai(
-        self,
-        *,
-        image_base64: str | None,
-        image_url: str | None,
-        hint_text: str | None,
-    ) -> dict[str, Any]:
-        data_url = image_url or self._build_image_data_url(image_base64)
-        if not data_url:
-            return self._build_empty_recipe_draft(hint_text=hint_text)
-
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是中文食谱整理助手。请根据食物图片识别菜品，并输出结构化食谱草稿。"
-                    "如果图片信息不完整，可以给出合理且保守的估计，但不要编造过细的营养数据。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": self._build_recipe_draft_prompt(hint_text)},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ],
-            },
-        ]
-        result = self._chat_completion(
-            messages,
-            schema=self._recipe_draft_schema(),
-            model_kind="image",
-            max_tokens=1400,
-        )
-        return self._copy_ai_meta(self._normalize_recipe_draft(result, hint_text=hint_text), result)
 
     def _recognize_with_zhipu(
         self,
@@ -1832,43 +1580,6 @@ class AIService:
         )
         return self._copy_ai_meta(self._normalize_analysis_result(result, payload), result)
 
-    def _analyze_with_openai(self, payload: dict[str, Any]) -> dict[str, Any]:
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是中文营养分析助手。请基于用户当餐或当天数据，输出简洁、可执行、"
-                    "适合中老年与慢病人群的建议。不要诊断疾病。"
-                    "请同时给出 0-100 的营养评分，综合考虑总量目标、蛋白/脂肪/碳水供能结构。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    "请根据下面 JSON 给出营养总结。\n"
-                    f"{json.dumps(self._prepare_for_json(payload), ensure_ascii=False)}"
-                ),
-            },
-        ]
-        schema = {
-            "name": "nutrition_analysis",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "score": {"type": "number"},
-                    "summary": {"type": "string"},
-                    "strengths": {"type": "array", "items": {"type": "string"}},
-                    "risks": {"type": "array", "items": {"type": "string"}},
-                    "next_actions": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["score", "summary", "strengths", "risks", "next_actions"],
-                "additionalProperties": False,
-            },
-        }
-        result = self._chat_completion(messages, schema=schema, model_kind="text", max_tokens=900)
-        return self._copy_ai_meta(self._normalize_analysis_result(result, payload), result)
-
     def _recommend_with_zhipu(self, payload: dict[str, Any]) -> dict[str, Any]:
         ai_payload = self._build_ai_recommendation_payload(payload)
         messages = build_recipe_recommendation_messages(self._prepare_for_json(ai_payload))
@@ -1879,27 +1590,8 @@ class AIService:
             max_tokens=500,
             response_format_type="json_object",
             retry_on_rate_limit=False,
+            timeout_seconds=RECOMMEND_AI_TIMEOUT_SECONDS,
         )
-        candidates = ai_payload.get("recipes") or self._recommend_with_rules(payload)
-        by_name = self._build_recipe_candidate_lookup(ai_payload, candidates)
-        by_id = {
-            str(item.get("recipe_id") or item.get("id")): item
-            for item in candidates
-            if item.get("recipe_id") is not None or item.get("id") is not None
-        }
-        merged: list[dict[str, Any]] = []
-        for item in data.get("items") or []:
-            candidate = by_id.get(str(item.get("recipe_id"))) if item.get("recipe_id") is not None else None
-            candidate = candidate or by_name.get(self._normalize_recipe_name(item.get("name")), {})
-            merged.append({**candidate, **item})
-        selected = self._apply_recommendation_refresh(merged, payload)
-        return self._copy_ai_meta({"items": self._ensure_recommendation_source_mix(selected or candidates, payload)}, data)
-
-    def _recommend_with_openai(self, payload: dict[str, Any]) -> dict[str, Any]:
-        ai_payload = self._build_ai_recommendation_payload(payload)
-        messages = build_recipe_recommendation_messages(self._prepare_for_json(ai_payload))
-        schema = build_recipe_recommendation_schema()
-        data = self._chat_completion(messages, schema=schema, model_kind="text", max_tokens=500)
         candidates = ai_payload.get("recipes") or self._recommend_with_rules(payload)
         by_name = self._build_recipe_candidate_lookup(ai_payload, candidates)
         by_id = {
@@ -1932,7 +1624,7 @@ class AIService:
                 self.config.ai_recipe_recommend_url,
                 json=payload,
                 headers=headers,
-                timeout=30,
+                timeout=RECOMMEND_AI_TIMEOUT_SECONDS,
             )
             response.raise_for_status()
             data = response.json()
@@ -1956,21 +1648,6 @@ class AIService:
                 return {
                     "items": ai_result.get("items") or [],
                     "provider": "zhipu",
-                    "_meta_ai": ai_result.get("_meta_ai"),
-                }
-            except Exception as exc:  # pragma: no cover
-                return {
-                    "items": self._finalize_recipe_items(self._recommend_with_rules(payload), payload),
-                    "provider": "rules",
-                    "message": f"AI 推荐不可用，已切换为规则推荐: {exc}",
-                }
-
-        if self.config.openai_api_key:
-            try:
-                ai_result = self._recommend_with_openai(payload)
-                return {
-                    "items": ai_result.get("items") or [],
-                    "provider": "openai",
                     "_meta_ai": ai_result.get("_meta_ai"),
                 }
             except Exception as exc:  # pragma: no cover

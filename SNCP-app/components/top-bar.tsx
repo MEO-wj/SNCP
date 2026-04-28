@@ -86,7 +86,7 @@ export function TopBar({
   );
 }
 
-const HOME_TOP_PADDING = 18;
+const HOME_TOP_PADDING = 32;
 const EXPLORE_TOP_PADDING = 44;
 
 function createStyles(colors: Palette, isDark: boolean) {

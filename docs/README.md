@@ -58,7 +58,7 @@ Flask API (/api)
   ├─ recipes / reminders / admin / ai
   ├─ repository 直接访问 PostgreSQL
   ├─ Redis：缓存 + 限流存储
-  └─ AIService：智谱 / OpenAI / 外部 AI 接口 / 本地规则兜底
+  └─ AIService：智谱 / 外部 AI 接口 / 本地规则兜底
               │
               ├─ PostgreSQL：业务主数据
               ├─ Redis：用户状态版本、推荐缓存、看板缓存

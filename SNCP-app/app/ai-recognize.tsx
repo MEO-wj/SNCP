@@ -213,8 +213,6 @@ export default function AIRecognizeScreen() {
     switch (recognition?.provider) {
       case 'zhipu':
         return '智谱视觉识别';
-      case 'openai':
-        return 'OpenAI 视觉识别';
       case 'remote':
         return '外部识别服务';
       case 'local':

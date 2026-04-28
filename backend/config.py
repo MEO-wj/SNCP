@@ -48,11 +48,6 @@ class Config:
         self.zhipu_text_model: str = "glm-4.7"
         self.themealdb_base_url: str = "https://www.themealdb.com/api"
         self.themealdb_api_key: str = "1"
-        self.openai_api_key: Optional[str] = None
-        self.openai_project_id: Optional[str] = None
-        self.openai_org_id: Optional[str] = None
-        self.openai_base_url: str = "https://api.openai.com/v1"
-        self.openai_model: str = "gpt-5-mini"
 
         self.load()
 
@@ -116,11 +111,6 @@ class Config:
             "ZHIPU_TEXT_MODEL",
             "THEMEALDB_BASE_URL",
             "THEMEALDB_API_KEY",
-            "OPENAI_API_KEY",
-            "OPENAI_PROJECT_ID",
-            "OPENAI_ORG_ID",
-            "OPENAI_BASE_URL",
-            "OPENAI_MODEL",
         ]
         for key in keys:
             value = os.getenv(key)
@@ -218,16 +208,6 @@ class Config:
             self.themealdb_base_url = value or self.themealdb_base_url
         elif key == "THEMEALDB_API_KEY":
             self.themealdb_api_key = value or self.themealdb_api_key
-        elif key == "OPENAI_API_KEY":
-            self.openai_api_key = value or None
-        elif key == "OPENAI_PROJECT_ID":
-            self.openai_project_id = value or None
-        elif key == "OPENAI_ORG_ID":
-            self.openai_org_id = value or None
-        elif key == "OPENAI_BASE_URL":
-            self.openai_base_url = value or self.openai_base_url
-        elif key == "OPENAI_MODEL":
-            self.openai_model = value or self.openai_model
 
     @staticmethod
     def _parse_ttl(raw: str, fallback: timedelta) -> timedelta:
