@@ -38,7 +38,7 @@ class UserRepository:
             cur.execute(
                 """
                 SELECT id, phone, display_name, password_hash, password_algo, password_cost,
-                       roles, avatar_data, created_at, updated_at, last_login_at
+                       roles, avatar_data, created_at, updated_at, last_login_at, last_seen_at
                 FROM users
                 WHERE phone = %s
                 """,
@@ -54,7 +54,7 @@ class UserRepository:
             cur.execute(
                 """
                 SELECT id, phone, display_name, password_hash, password_algo, password_cost,
-                       roles, avatar_data, created_at, updated_at, last_login_at
+                       roles, avatar_data, created_at, updated_at, last_login_at, last_seen_at
                 FROM users
                 WHERE id = %s
                 """,
@@ -81,7 +81,7 @@ class UserRepository:
                     id, phone, display_name, password_hash, password_algo, password_cost
                 ) VALUES (%s, %s, %s, %s, %s, %s)
                 RETURNING id, phone, display_name, password_hash, password_algo, password_cost,
-                          roles, avatar_data, created_at, updated_at, last_login_at
+                          roles, avatar_data, created_at, updated_at, last_login_at, last_seen_at
                 """,
                 (
                     uid,
@@ -154,6 +154,15 @@ class UserRepository:
             )
             conn.commit()
 
+    def record_activity(self, user_id: UUID) -> None:
+        now = datetime.now(timezone.utc)
+        with db_session() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET last_seen_at = %s WHERE id = %s",
+                (now, user_id),
+            )
+            conn.commit()
+
     def update_credentials(
         self,
         user_id: UUID,
@@ -203,7 +212,7 @@ class UserRepository:
                     updated_at = %s
                 WHERE id = %s
                 RETURNING id, phone, display_name, password_hash, password_algo, password_cost,
-                          roles, avatar_data, created_at, updated_at, last_login_at
+                          roles, avatar_data, created_at, updated_at, last_login_at, last_seen_at
                 """,
                 (display_name, avatar_data, now, user_id),
             )
@@ -226,6 +235,7 @@ class UserRepository:
             created_at=row["created_at"],
             updated_at=row.get("updated_at"),
             last_login_at=row.get("last_login_at"),
+            last_seen_at=row.get("last_seen_at"),
         )
 
     def _row_to_session(self, row: dict) -> Session:

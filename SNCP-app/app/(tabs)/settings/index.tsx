@@ -37,6 +37,7 @@ import { useUserProfile } from '@/hooks/use-user-profile';
 import { clearAuthStorage, getUserProfileRaw } from '@/storage/auth-storage';
 import { getThemePreference, setThemePreference as saveThemePreference, type ThemePreference } from '@/storage/theme-storage';
 import { fetchMyAccount } from '@/services/account';
+import { reportLogoutActivityIfNeeded } from '@/services/activity';
 import { fetchGoals, fetchProfile } from '@/services/profile';
 import type { HealthProfile, NutritionGoals } from '@/types/profile';
 
@@ -300,6 +301,7 @@ export default function SettingsScreen() {
       };
 
   const handleLogout = async () => {
+    await reportLogoutActivityIfNeeded(token);
     await clearAuthStorage();
     await setAuthToken(null);
     router.replace('/login');

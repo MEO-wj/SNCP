@@ -19,6 +19,7 @@ class User:
     created_at: datetime
     updated_at: Optional[datetime]
     last_login_at: Optional[datetime]
+    last_seen_at: Optional[datetime]
 
 
 @dataclass

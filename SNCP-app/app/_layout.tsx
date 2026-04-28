@@ -6,8 +6,17 @@ import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 
 import { useAuthTokenState } from '@/hooks/use-auth-token';
+import { reportExitActivityIfNeeded, reportLaunchActivityIfNeeded, resetRuntimeActivityTracking } from '@/services/activity';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { refreshSessionOnForeground } from '@/services/auth';
+
+function shouldTrackAppActivity(segments: string[]) {
+  if (!segments.length || segments[0] !== '(tabs)') {
+    return false;
+  }
+  const activeTab = segments[1] ?? 'index';
+  return activeTab === 'index' || activeTab === 'record' || activeTab === 'recommend';
+}
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -25,13 +34,29 @@ export default function RootLayout() {
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         refreshIfActive();
+        return;
+      }
+
+      if ((state === 'inactive' || state === 'background') && token) {
+        void reportExitActivityIfNeeded(token, 'background');
       }
     });
 
     return () => {
       subscription.remove();
     };
-  }, []);
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) {
+      resetRuntimeActivityTracking();
+      return;
+    }
+    if (isLoading || !shouldTrackAppActivity(segments)) {
+      return;
+    }
+    void reportLaunchActivityIfNeeded(token);
+  }, [isLoading, segments, token]);
 
   useEffect(() => {
     if (isLoading) return;

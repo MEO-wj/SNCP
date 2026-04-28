@@ -227,12 +227,14 @@ class AdminDashboardRepository:
                 FROM (
                     SELECT id AS user_id FROM users WHERE last_login_at >= %s
                     UNION
+                    SELECT id AS user_id FROM users WHERE last_seen_at >= %s
+                    UNION
                     SELECT user_id FROM meals WHERE created_at >= %s
                     UNION
                     SELECT user_id FROM ai_usage_logs WHERE created_at >= %s
                 ) AS active_users
                 """,
-                (since, since, since),
+                (since, since, since, since),
             )
             row = cur.fetchone() or {}
         return int(row.get("total") or 0)
@@ -310,6 +312,7 @@ class AdminDashboardRepository:
                     COALESCE(ai.ai_call_count, 0) AS ai_call_count,
                     GREATEST(
                         COALESCE(u.last_login_at, u.created_at),
+                        COALESCE(u.last_seen_at, u.created_at),
                         COALESCE(ms.last_meal_at, u.created_at),
                         COALESCE(ai.last_ai_call_at, u.created_at)
                     ) AS last_active_at
@@ -364,6 +367,7 @@ class AdminDashboardRepository:
                     COALESCE(ai.ai_call_count, 0) AS ai_call_count,
                     GREATEST(
                         COALESCE(u.last_login_at, u.created_at),
+                        COALESCE(u.last_seen_at, u.created_at),
                         COALESCE(ms.last_meal_at, u.created_at),
                         COALESCE(ai.last_ai_call_at, u.created_at)
                     ) AS last_active_at

@@ -12,6 +12,7 @@ from backend.config import Config
 from backend.repository.user_repository import NotFoundError, UserRepository
 from backend.services.auth_service import AuthMetadata, AuthService
 from backend.services.exceptions import InvalidCredentialsError, UnauthorizedError, ValidationError
+from backend.utils.request_context import get_request_user_id
 
 bp = Blueprint("auth", __name__)
 
@@ -204,6 +205,22 @@ def logout():
         logger.exception("logout failed")
         return jsonify({"error": f"登出失败: {exc}"}), 500
     return jsonify({"message": "已登出"}), 200
+
+
+@bp.route("/activity", methods=["POST"])
+@login_required
+def record_activity():
+    user_id = get_request_user_id(request)
+    if not user_id:
+        return jsonify({"error": "用户信息缺失"}), 400
+
+    try:
+        user_repo.record_activity(user_id)
+    except Exception as exc:  # pragma: no cover
+        logger.exception("record activity failed")
+        return jsonify({"error": f"记录活跃时间失败: {exc}"}), 500
+
+    return ("", 204)
 
 
 @bp.route("/me", methods=["GET"])

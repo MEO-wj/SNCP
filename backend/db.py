@@ -39,10 +39,12 @@ def init_db() -> None:
             avatar_data TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            last_login_at TIMESTAMPTZ
+            last_login_at TIMESTAMPTZ,
+            last_seen_at TIMESTAMPTZ
         );
         """,
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data TEXT;",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;",
         """
         CREATE TABLE IF NOT EXISTS sessions (
             id UUID PRIMARY KEY,
