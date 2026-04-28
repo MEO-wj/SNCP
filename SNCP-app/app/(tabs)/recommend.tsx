@@ -38,19 +38,6 @@ type LoadOptions = {
 
 const RECOMMEND_CACHE_FRESH_MS = 15 * 60 * 1000;
 
-function getProviderLabel(provider: string): string {
-  switch (provider) {
-    case 'zhipu':
-      return '智谱 AI';
-    case 'rules':
-      return '本地规则';
-    case 'remote':
-      return '远程服务';
-    default:
-      return provider;
-  }
-}
-
 function getRecipeMetaText(recipe: RecipePost): string {
   const tagText = recipe.tags.slice(0, 2).join('、');
   return `食谱库 · ${tagText || recipe.cuisine || '健康食谱'}`;
@@ -123,6 +110,19 @@ function buildRecipeSummaryFallback(post: RecipePost) {
     return `${post.name}主打${post.tags.slice(0, 2).join('、')}，适合作为日常健康餐。`;
   }
   return `${post.name}适合作为日常家常餐，营养均衡且容易上手。`;
+}
+
+function getRecommendationHelperText(provider: string, message: string) {
+  switch (provider) {
+    case 'zhipu':
+      return '已按食谱库智能推荐';
+    case 'rules':
+      return '已按食谱库快速推荐';
+    case 'remote':
+      return '已同步推荐结果';
+    default:
+      return message.trim() || '按关键词查看推荐';
+  }
 }
 
 function repairCachedRecommendationSummaries(posts: RecipePost[], libraryPosts: RecipePost[]): RecipePost[] {
@@ -215,6 +215,10 @@ export default function RecommendScreen() {
     [isAdmin, recipePosts],
   );
   const localRecipeNameSet = useMemo(() => getLocalRecipeNameSet(recipePosts), [recipePosts]);
+  const recommendationHelperText = useMemo(
+    () => getRecommendationHelperText(provider, message),
+    [message, provider],
+  );
 
   const handleOpenRecipe = useCallback(
     (recipe: RecipePost) => {
@@ -487,14 +491,8 @@ export default function RecommendScreen() {
             <Sparkle size={14} color={palette.orange500} weight="fill" />
             <Text style={styles.heroBadgeText}>智能推荐</Text>
           </View>
-          <Text style={styles.title}>
-            {isAdmin ? '先看食谱库，再按需刷新推荐' : '先搜本地食谱，不够时再帮你补充推荐'}
-          </Text>
-          <Text style={styles.heroText}>
-            {isAdmin
-              ? '管理员视角下，服务器食谱库就是你的食谱库，推荐结果可直接查看，不再区分加入本地库。'
-              : '推荐会优先参考你已经加入本地食谱库的内容；还没加入的推荐菜可以直接一键加入，后续会更贴合你的常吃习惯。'}
-          </Text>
+          <Text style={styles.title}>食谱库推荐</Text>
+          <Text style={styles.heroText}>AI针对用户饮食，智能匹配推荐食谱。</Text>
         </View>
 
         <View style={styles.searchRow}>
@@ -515,29 +513,22 @@ export default function RecommendScreen() {
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>AI 推荐结果</Text>
-            <View style={styles.sectionHeaderActions}>
-              <Pressable
-                style={[styles.refreshButton, loading && styles.refreshButtonDisabled]}
-                onPress={handleRefreshRecommendations}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator size="small" color={palette.orange500} />
-                ) : (
-                  <ArrowsClockwise size={14} color={palette.orange500} weight="bold" />
-                )}
-                <Text style={styles.refreshButtonText}>{loading ? '刷新中' : '刷新推荐'}</Text>
-              </Pressable>
-              {provider ? (
-                <View style={styles.providerChip}>
-                  <Text style={styles.providerChipText}>{getProviderLabel(provider)}</Text>
-                </View>
-              ) : null}
-            </View>
+            <Text style={styles.sectionTitle}>推荐结果</Text>
+            <Pressable
+              style={[styles.refreshButton, loading && styles.refreshButtonDisabled]}
+              onPress={handleRefreshRecommendations}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color={palette.orange500} />
+              ) : (
+                <ArrowsClockwise size={14} color={palette.orange500} weight="bold" />
+              )}
+              <Text style={styles.refreshButtonText}>{loading ? '刷新中' : '刷新推荐'}</Text>
+            </Pressable>
           </View>
 
-          {message ? <Text style={styles.helperText}>{message}</Text> : null}
+          <Text style={styles.helperText}>{recommendationHelperText}</Text>
 
           {recommendationPosts.length === 0 ? (
             <Text style={styles.emptyText}>当前没有匹配的推荐，可以换个关键词再试试。</Text>

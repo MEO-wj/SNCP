@@ -239,7 +239,7 @@ export default function AccountDetailScreen() {
             </View>
           </View>
 
-          <Text style={styles.helperText}>当前支持修改头像、昵称和登录密码，手机号暂不支持修改。</Text>
+          <Text style={styles.helperText}>支持修改头像、昵称和登录密码，手机号暂不支持修改。</Text>
           {profileErrorText ? <Text style={styles.errorText}>{profileErrorText}</Text> : null}
         </View>
 

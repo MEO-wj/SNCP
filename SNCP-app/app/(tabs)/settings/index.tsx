@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Constants from 'expo-constants';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -15,7 +16,9 @@ import {
   Phone,
   Ruler,
   Scales,
+  SquaresFour,
   SunDim,
+  TagSimple,
   Target,
 } from 'phosphor-react-native';
 
@@ -46,6 +49,7 @@ export default function SettingsScreen() {
   const styles = useMemo(() => createStyles(palette), [palette]);
   const token = useAuthToken();
   const userProfile = useUserProfile();
+  const appVersion = String(Constants.expoConfig?.version || '未知版本');
   const [cachedUserProfile, setCachedUserProfile] = useState<{
     id?: string;
     display_name?: string;
@@ -211,7 +215,7 @@ export default function SettingsScreen() {
       profile.birth_year ? `${profile.birth_year}年生` : '',
       profile.height_cm ? `${profile.height_cm}cm` : '',
       profile.weight_kg ? `${profile.weight_kg}kg` : '',
-      chronicConditions.length > 0 ? `慢性病 ${hasNoChronicDisease ? NO_CHRONIC_DISEASE_LABEL : chronicConditionItems.join('、')}` : '',
+      chronicConditions.length > 0 ? (hasNoChronicDisease ? NO_CHRONIC_DISEASE_LABEL : chronicConditionItems.join('、')) : '',
     ].filter(Boolean);
     return values.length > 0 ? values.join(' · ') : '未完善，点击填写';
   }, [profile]);
@@ -383,7 +387,7 @@ export default function SettingsScreen() {
           <View style={styles.entryHead}>
             <View style={styles.entryTitleGroup}>
               <View style={[styles.entryIconBadge, styles.healthIconBadge]}>
-                <Heartbeat size={20} color={palette.orange500} weight="fill" />
+                <Heartbeat size={18} color={palette.orange500} weight="fill" />
               </View>
               <View style={styles.entryTitleTextGroup}>
                 <Text style={styles.cardTitle}>健康档案</Text>
@@ -422,7 +426,7 @@ export default function SettingsScreen() {
           <View style={styles.entryHead}>
             <View style={styles.entryTitleGroup}>
               <View style={[styles.entryIconBadge, styles.goalsIconBadge]}>
-                <Target size={20} color={palette.green500} weight="fill" />
+                <Target size={18} color={palette.green500} weight="fill" />
               </View>
               <View style={styles.entryTitleTextGroup}>
                 <Text style={styles.cardTitle}>营养目标</Text>
@@ -582,7 +586,14 @@ export default function SettingsScreen() {
         </View>
 
         <View style={[styles.card, styles.featureCard]}>
-          <Text style={styles.cardTitle}>功能入口</Text>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionTitleGroup}>
+              <View style={styles.sectionIconBadge}>
+                <SquaresFour size={18} color={palette.orange500} weight="fill" />
+              </View>
+              <Text style={styles.cardTitle}>功能入口</Text>
+            </View>
+          </View>
           <Pressable style={styles.linkButton} onPress={() => router.push('/reminders')}>
             <Text style={styles.linkButtonText}>提醒设置</Text>
             <Text style={styles.linkArrow}>›</Text>
@@ -599,6 +610,20 @@ export default function SettingsScreen() {
               </Pressable>
             </>
           )}
+        </View>
+
+        <View style={[styles.card, styles.versionCard]}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionTitleGroup}>
+              <View style={styles.sectionIconBadge}>
+                <TagSimple size={18} color={palette.orange500} weight="fill" />
+              </View>
+              <Text style={styles.cardTitle}>当前版本</Text>
+            </View>
+            <View style={styles.versionBadge}>
+              <Text style={styles.versionBadgeText}>{`v${appVersion}`}</Text>
+            </View>
+          </View>
         </View>
 
         <Pressable style={styles.logoutButton} onPress={handleLogout}>
@@ -657,18 +682,21 @@ function createStyles(palette: Palette) {
     featureCard: {
       borderColor: palette.stone100,
     },
+    versionCard: {
+      borderColor: palette.stone100,
+    },
     themeHeader: {
       gap: 12,
     },
     themeTitleGroup: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 12,
+      gap: 10,
     },
     themeTitleBadge: {
-      width: 42,
-      height: 42,
-      borderRadius: 14,
+      width: 36,
+      height: 36,
+      borderRadius: 12,
       alignItems: 'center',
       justifyContent: 'center',
       borderWidth: 1,
@@ -891,7 +919,7 @@ function createStyles(palette: Palette) {
     entryTitleGroup: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 12,
+      gap: 10,
       flex: 1,
     },
     entryTitleTextGroup: {
@@ -899,9 +927,9 @@ function createStyles(palette: Palette) {
       gap: 2,
     },
     entryIconBadge: {
-      width: 44,
-      height: 44,
-      borderRadius: 16,
+      width: 36,
+      height: 36,
+      borderRadius: 12,
       alignItems: 'center',
       justifyContent: 'center',
       borderWidth: 1,
@@ -1078,6 +1106,41 @@ function createStyles(palette: Palette) {
       fontSize: 20,
       fontWeight: '500',
       lineHeight: 20,
+    },
+    sectionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    sectionTitleGroup: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      flex: 1,
+    },
+    sectionIconBadge: {
+      width: 36,
+      height: 36,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: palette.surfaceWarm,
+      borderWidth: 1,
+      borderColor: palette.gold100,
+    },
+    versionBadge: {
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      backgroundColor: palette.surfaceWarm,
+      borderWidth: 1,
+      borderColor: palette.gold100,
+    },
+    versionBadgeText: {
+      color: palette.stone850,
+      fontSize: 13,
+      fontWeight: '800',
     },
     logoutButton: {
       backgroundColor: palette.imperial100,

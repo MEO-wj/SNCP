@@ -261,12 +261,17 @@ export default function MealHistoryScreen() {
         </Pressable>
 
         <View style={styles.heroCard}>
-          <View style={styles.heroBadge}>
-            <ClockCounterClockwise size={14} color={palette.orange500} weight="fill" />
-            <Text style={styles.heroBadgeText}>历史卡片</Text>
+          <View style={styles.heroTopRow}>
+            <View style={styles.heroBadge}>
+              <ClockCounterClockwise size={14} color={palette.orange500} weight="fill" />
+              <Text style={styles.heroBadgeText}>历史卡片</Text>
+            </View>
+            <View style={styles.countBadge}>
+              <Text style={styles.countBadgeText}>{`总 ${meals.length} 张`}</Text>
+            </View>
           </View>
-          <Text style={styles.title}>查看曾经的饮食记录</Text>
-          <Text style={styles.heroText}>按日期切换查看过去的饮食卡片，方便回看和后续继续补充编辑能力。</Text>
+          <Text style={styles.title}>历史餐次记录</Text>
+          <Text style={styles.heroText}>按日期切换查看过去饮食卡片，方便回看和编辑。</Text>
         </View>
 
         <View style={styles.dateBar}>
@@ -276,7 +281,6 @@ export default function MealHistoryScreen() {
 
           <View style={styles.dateLabelWrap}>
             <Text style={styles.dateLabel}>{formatHistoryDate(selectedDate)}</Text>
-            <Text style={styles.dateHint}>{selectedDate === todayKey ? '今天' : selectedDate}</Text>
           </View>
 
           <Pressable
@@ -299,9 +303,10 @@ export default function MealHistoryScreen() {
             <View>
               <Text style={styles.cardTitle}>饮食卡片</Text>
               <Text style={styles.cardHint}>这里会显示所选日期的全部餐次卡片。</Text>
-            </View>
-            <View style={styles.countBadge}>
-              <Text style={styles.countBadgeText}>{meals.length} 张</Text>
+              <View style={styles.cardCountRow}>
+                <ClockCounterClockwise size={13} color={palette.blue500} weight="fill" />
+                <Text style={styles.cardCountRowText}>{`当日 ${meals.length} 张`}</Text>
+              </View>
             </View>
           </View>
 
@@ -538,6 +543,12 @@ function createStyles(palette: Palette, isDark: boolean) {
       borderColor: panelBorder,
       gap: 10,
     },
+    heroTopRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
     heroBadge: {
       alignSelf: 'flex-start',
       flexDirection: 'row',
@@ -588,20 +599,18 @@ function createStyles(palette: Palette, isDark: boolean) {
       flex: 1,
       borderRadius: 18,
       paddingHorizontal: 14,
-      paddingVertical: 11,
-      backgroundColor: panelSurface,
+      minHeight: 54,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: isDark ? 'rgba(28, 25, 23, 0.96)' : 'rgba(41, 35, 30, 0.92)',
       borderWidth: 1,
       borderColor: panelBorder,
-      gap: 2,
     },
     dateLabel: {
       fontSize: 15,
       fontWeight: '800',
-      color: palette.stone900,
-    },
-    dateHint: {
-      fontSize: 12,
-      color: palette.stone500,
+      color: '#FFF8F2',
+      textAlign: 'center',
     },
     todayButton: {
       alignSelf: 'flex-start',
@@ -628,7 +637,6 @@ function createStyles(palette: Palette, isDark: boolean) {
     cardHeader: {
       flexDirection: 'row',
       alignItems: 'flex-start',
-      justifyContent: 'space-between',
       gap: 12,
     },
     cardTitle: {
@@ -642,6 +650,24 @@ function createStyles(palette: Palette, isDark: boolean) {
       lineHeight: 19,
       color: palette.stone500,
     },
+    cardCountRow: {
+      marginTop: 10,
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
+      backgroundColor: badgeSurface,
+      borderWidth: 1,
+      borderColor: badgeBorder,
+    },
+    cardCountRowText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.blue500,
+    },
     countBadge: {
       paddingHorizontal: 10,
       paddingVertical: 6,
@@ -653,7 +679,7 @@ function createStyles(palette: Palette, isDark: boolean) {
     countBadgeText: {
       fontSize: 12,
       fontWeight: '700',
-      color: palette.blue500,
+      color: palette.orange500,
     },
     loadingWrap: {
       flexDirection: 'row',
