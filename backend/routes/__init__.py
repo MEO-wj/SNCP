@@ -1,6 +1,6 @@
 """API路由模块。"""
 
-from . import auth, ai, dashboard, meals, profile, recipes, reminders, admin
+from . import auth, ai, dashboard, meals, profile, recipes, reminders, admin, update
 
 __all__ = [
     "auth",
@@ -11,4 +11,5 @@ __all__ = [
     "recipes",
     "reminders",
     "admin",
+    "update",
 ]

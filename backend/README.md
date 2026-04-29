@@ -39,6 +39,7 @@ backend/
 - `routes/reminders.py`：提醒
 - `routes/admin.py`：后台管理
 - `routes/ai.py`：AI 能力入口
+- `routes/update.py`：客户端版本检测、安卓 APK 下载
 
 ## 本地启动
 
@@ -102,6 +103,33 @@ docker compose up --build
 - `AI_FOOD_RECOGNITION_URL`
 - `AI_NUTRITION_ANALYSIS_URL`
 - `AI_RECIPE_RECOMMEND_URL`
+
+### 更新发布
+
+- `APP_UPDATE_LATEST_VERSION`
+- `APP_UPDATE_LATEST_BUILD`
+- `APP_UPDATE_MIN_SUPPORTED_BUILD`
+- `APP_UPDATE_FORCE_UPDATE`
+- `APP_UPDATE_RELEASE_NOTES`
+- `APP_UPDATE_ANDROID_APK_PATH`
+- `APP_UPDATE_ANDROID_APK_URL`
+
+## APK 更新接口
+
+- `GET /api/update/check?platform=android&build=41&version=1.3.0`
+  返回是否需要更新、是否强制更新、最新构建号和 APK 下载链接。
+- `GET /api/update/android/apk`
+  当配置了 `APP_UPDATE_ANDROID_APK_PATH` 时由当前后端直接下发 APK；
+  当只配置了 `APP_UPDATE_ANDROID_APK_URL` 时会 302 跳转到外部下载地址。
+
+## 如何发布新 APK
+
+1. 打包并签名新的 Android APK，确保包名和签名证书与线上版本一致。
+2. 把 APK 上传到服务器，并记录服务器上的文件路径。
+3. 在 `backend/.env` 中更新 `APP_UPDATE_LATEST_VERSION`、`APP_UPDATE_LATEST_BUILD`、`APP_UPDATE_MIN_SUPPORTED_BUILD`。
+4. 如果让当前 Flask 服务直接托管 APK，设置 `APP_UPDATE_ANDROID_APK_PATH` 为服务器上的 APK 绝对路径或项目相对路径；如果由对象存储/CDN 提供下载，则设置 `APP_UPDATE_ANDROID_APK_URL`。
+5. 按需更新 `APP_UPDATE_FORCE_UPDATE` 和 `APP_UPDATE_RELEASE_NOTES`。
+6. 重启后端服务，使新的发布信息立即生效。
 
 ## 数据层说明
 

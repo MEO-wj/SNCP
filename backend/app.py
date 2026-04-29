@@ -169,7 +169,7 @@ def health_check() -> tuple[Any, int]:
     }), 200
 
 # 导入并注册路由
-from backend.routes import auth, ai, dashboard, meals, profile, recipes, reminders, admin
+from backend.routes import auth, ai, dashboard, meals, profile, recipes, reminders, admin, update
 
 app.register_blueprint(auth.bp, url_prefix="/api/auth")
 app.register_blueprint(ai.bp, url_prefix="/api/ai")
@@ -179,6 +179,7 @@ app.register_blueprint(profile.bp, url_prefix="/api/profile")
 app.register_blueprint(recipes.bp, url_prefix="/api/recipes")
 app.register_blueprint(reminders.bp, url_prefix="/api/reminders")
 app.register_blueprint(admin.bp, url_prefix="/api/admin")
+app.register_blueprint(update.bp, url_prefix="/api/update")
 
 if __name__ == '__main__':
     # 开发环境运行

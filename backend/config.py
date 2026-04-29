@@ -48,6 +48,16 @@ class Config:
         self.zhipu_text_model: str = "glm-4.7"
         self.themealdb_base_url: str = "https://www.themealdb.com/api"
         self.themealdb_api_key: str = "1"
+        self.app_update_latest_version: Optional[str] = None
+        self.app_update_latest_build: int = 0
+        self.app_update_min_supported_build: int = 0
+        self.app_update_force_update: bool = False
+        self.app_update_published_at: Optional[str] = None
+        self.app_update_release_notes: list[str] = []
+        self.app_update_android_apk_url: Optional[str] = None
+        self.app_update_android_apk_path: Optional[Path] = None
+        self.app_update_android_download_name: Optional[str] = None
+        self.app_update_ios_url: Optional[str] = None
 
         self.load()
 
@@ -111,6 +121,16 @@ class Config:
             "ZHIPU_TEXT_MODEL",
             "THEMEALDB_BASE_URL",
             "THEMEALDB_API_KEY",
+            "APP_UPDATE_LATEST_VERSION",
+            "APP_UPDATE_LATEST_BUILD",
+            "APP_UPDATE_MIN_SUPPORTED_BUILD",
+            "APP_UPDATE_FORCE_UPDATE",
+            "APP_UPDATE_PUBLISHED_AT",
+            "APP_UPDATE_RELEASE_NOTES",
+            "APP_UPDATE_ANDROID_APK_URL",
+            "APP_UPDATE_ANDROID_APK_PATH",
+            "APP_UPDATE_ANDROID_DOWNLOAD_NAME",
+            "APP_UPDATE_IOS_URL",
         ]
         for key in keys:
             value = os.getenv(key)
@@ -208,6 +228,30 @@ class Config:
             self.themealdb_base_url = value or self.themealdb_base_url
         elif key == "THEMEALDB_API_KEY":
             self.themealdb_api_key = value or self.themealdb_api_key
+        elif key == "APP_UPDATE_LATEST_VERSION":
+            self.app_update_latest_version = value or None
+        elif key == "APP_UPDATE_LATEST_BUILD":
+            self.app_update_latest_build = self._parse_int(value, fallback=self.app_update_latest_build, minimum=0)
+        elif key == "APP_UPDATE_MIN_SUPPORTED_BUILD":
+            self.app_update_min_supported_build = self._parse_int(
+                value,
+                fallback=self.app_update_min_supported_build,
+                minimum=0,
+            )
+        elif key == "APP_UPDATE_FORCE_UPDATE":
+            self.app_update_force_update = self._parse_bool(value, fallback=self.app_update_force_update)
+        elif key == "APP_UPDATE_PUBLISHED_AT":
+            self.app_update_published_at = value or None
+        elif key == "APP_UPDATE_RELEASE_NOTES":
+            self.app_update_release_notes = [part.strip() for part in value.split("|") if part.strip()]
+        elif key == "APP_UPDATE_ANDROID_APK_URL":
+            self.app_update_android_apk_url = value or None
+        elif key == "APP_UPDATE_ANDROID_APK_PATH":
+            self.app_update_android_apk_path = self._resolve_path(value) if value else None
+        elif key == "APP_UPDATE_ANDROID_DOWNLOAD_NAME":
+            self.app_update_android_download_name = value or None
+        elif key == "APP_UPDATE_IOS_URL":
+            self.app_update_ios_url = value or None
 
     @staticmethod
     def _parse_ttl(raw: str, fallback: timedelta) -> timedelta:
@@ -216,6 +260,25 @@ class Config:
             return timedelta(seconds=seconds)
         except ValueError:
             return fallback
+
+    @staticmethod
+    def _parse_int(raw: str, fallback: int, minimum: int | None = None) -> int:
+        try:
+            value = int(raw)
+        except ValueError:
+            return fallback
+        if minimum is not None and value < minimum:
+            return fallback
+        return value
+
+    @staticmethod
+    def _parse_bool(raw: str, fallback: bool) -> bool:
+        normalized = raw.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        return fallback
 
 
 __all__ = ["Config"]
