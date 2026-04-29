@@ -7,9 +7,11 @@ import 'react-native-reanimated';
 
 import { AppUpdateModal } from '@/components/app-update-modal';
 import { useAuthTokenState } from '@/hooks/use-auth-token';
-import { reportExitActivityIfNeeded, reportLaunchActivityIfNeeded, resetRuntimeActivityTracking } from '@/services/activity';
+import { reportExitActivityIfNeeded, reportLaunchActivityIfNeeded, reportLogoutActivityIfNeeded, resetRuntimeActivityTracking } from '@/services/activity';
+import { revokeAdminAppUpdate } from '@/services/admin-dashboard';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { refreshSessionOnForeground } from '@/services/auth';
+import { clearAuthStorage, getUserProfileRaw } from '@/storage/auth-storage';
 import {
   type AndroidUpdateCheckResult,
   checkAndroidAppUpdate,
@@ -29,10 +31,53 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
   const router = useRouter();
   const segments = useSegments();
-  const { token, isLoading } = useAuthTokenState();
+  const { token, isLoading, setAuthToken } = useAuthTokenState();
   const [pendingUpdate, setPendingUpdate] = useState<AndroidUpdateCheckResult | null>(null);
   const [openingUpdate, setOpeningUpdate] = useState(false);
+  const [supportingUpdate, setSupportingUpdate] = useState(false);
+  const [viewerRoles, setViewerRoles] = useState<string[]>([]);
+  const [viewerRolesLoaded, setViewerRolesLoaded] = useState(false);
   const updateCheckedRef = useRef(false);
+  const firstSegment = segments[0] ?? '';
+  const inAuth = firstSegment === 'login' || firstSegment === 'register';
+  const isAdminViewer = viewerRoles.includes('admin') || viewerRoles.includes('webmaster');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!token) {
+      setViewerRoles([]);
+      setViewerRolesLoaded(true);
+      return;
+    }
+
+    setViewerRolesLoaded(false);
+    void getUserProfileRaw()
+      .then((raw) => {
+        if (cancelled) {
+          return;
+        }
+        try {
+          const parsed = raw ? (JSON.parse(raw) as { roles?: string[] }) : null;
+          setViewerRoles(Array.isArray(parsed?.roles) ? parsed.roles : []);
+        } catch {
+          setViewerRoles([]);
+        } finally {
+          setViewerRolesLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setViewerRoles([]);
+        setViewerRolesLoaded(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   useEffect(() => {
     const refreshIfActive = () => {
@@ -72,9 +117,6 @@ export default function RootLayout() {
     if (isLoading) return;
     if (!segments.length) return;
 
-    const first = segments[0];
-    const inAuth = first === 'login' || first === 'register';
-
     if (!token && !inAuth) {
       router.replace('/login');
       return;
@@ -86,7 +128,19 @@ export default function RootLayout() {
   }, [isLoading, router, segments, token]);
 
   useEffect(() => {
-    if (isLoading || updateCheckedRef.current || !shouldCheckForAppUpdate()) {
+    if (inAuth) {
+      setPendingUpdate(null);
+      updateCheckedRef.current = false;
+      return;
+    }
+
+    if (!token) {
+      updateCheckedRef.current = false;
+    }
+  }, [inAuth, token]);
+
+  useEffect(() => {
+    if (isLoading || inAuth || updateCheckedRef.current || !shouldCheckForAppUpdate()) {
       return;
     }
 
@@ -115,7 +169,7 @@ export default function RootLayout() {
     return () => {
       cancelled = true;
     };
-  }, [isLoading]);
+  }, [inAuth, isLoading, token]);
 
   const handleDismissUpdate = () => {
     if (pendingUpdate?.mustUpdate || openingUpdate) {
@@ -143,6 +197,40 @@ export default function RootLayout() {
     }
   };
 
+  const handleSupportUpdateAction = async () => {
+    if (!pendingUpdate?.mustUpdate || supportingUpdate || openingUpdate) {
+      return;
+    }
+
+    setSupportingUpdate(true);
+    try {
+      if (token && viewerRolesLoaded && isAdminViewer) {
+        const result = await revokeAdminAppUpdate(token);
+        setPendingUpdate(null);
+        Alert.alert('已撤销本次更新', result.message || '当前安装包升级提示已关闭。');
+        return;
+      }
+
+      if (token) {
+        await reportLogoutActivityIfNeeded(token);
+      }
+      await clearAuthStorage();
+      await setAuthToken(null);
+      setPendingUpdate(null);
+      router.replace('/login');
+    } catch (error) {
+      console.error('Failed to handle support update action:', error);
+      Alert.alert(
+        token && viewerRolesLoaded && isAdminViewer ? '撤销失败' : '退出失败',
+        token && viewerRolesLoaded && isAdminViewer
+          ? '请稍后重试，或在管理员后台手动撤销本次更新。'
+          : '请稍后重试，或联系管理员处理当前安装包更新。',
+      );
+    } finally {
+      setSupportingUpdate(false);
+    }
+  };
+
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack initialRouteName="login">
@@ -154,11 +242,20 @@ export default function RootLayout() {
         <Stack.Screen name="recipes/[postId]" options={{ headerShown: false }} />
       </Stack>
       <AppUpdateModal
-        visible={Boolean(pendingUpdate)}
+        visible={Boolean(pendingUpdate) && !inAuth}
         update={pendingUpdate}
         opening={openingUpdate}
+        supportActionLabel={
+          pendingUpdate?.mustUpdate && viewerRolesLoaded
+            ? isAdminViewer
+              ? '撤销本次更新'
+              : '退出登录'
+            : null
+        }
+        supportActionLoading={supportingUpdate}
         onConfirm={() => void handleOpenUpdate()}
         onDismiss={handleDismissUpdate}
+        onSupportAction={() => void handleSupportUpdateAction()}
       />
       <StatusBar style="auto" />
     </ThemeProvider>

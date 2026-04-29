@@ -18,8 +18,11 @@ type Props = {
   visible: boolean;
   update: AndroidUpdateCheckResult | null;
   opening: boolean;
+  supportActionLabel?: string | null;
+  supportActionLoading?: boolean;
   onConfirm: () => void;
   onDismiss: () => void;
+  onSupportAction?: () => void;
 };
 
 function formatVersionLabel(version: string | null, build: number | null) {
@@ -30,7 +33,34 @@ function formatVersionLabel(version: string | null, build: number | null) {
   return `${versionText} · build ${build}`;
 }
 
-export function AppUpdateModal({ visible, update, opening, onConfirm, onDismiss }: Props) {
+function formatPublishedAt(value: string | null) {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+export function AppUpdateModal({
+  visible,
+  update,
+  opening,
+  supportActionLabel,
+  supportActionLoading = false,
+  onConfirm,
+  onDismiss,
+  onSupportAction,
+}: Props) {
   const palette = usePalette();
   const styles = useMemo(() => createStyles(palette), [palette]);
 
@@ -41,6 +71,8 @@ export function AppUpdateModal({ visible, update, opening, onConfirm, onDismiss 
   const releaseNotes = update.releaseNotes.length
     ? update.releaseNotes
     : ['发现新的安卓安装包，可下载后覆盖安装。'];
+  const publishedAtLabel = formatPublishedAt(update.publishedAt);
+  const showSupportAction = update.mustUpdate && Boolean(supportActionLabel) && onSupportAction;
 
   return (
     <Modal transparent animationType="fade" visible={visible} statusBarTranslucent>
@@ -69,6 +101,12 @@ export function AppUpdateModal({ visible, update, opening, onConfirm, onDismiss 
               ? '当前版本已低于最低支持版本，请下载新安装包后继续使用。'
               : '已有新版本可下载，安装后即可使用最新能力。'}
           </Text>
+
+          {publishedAtLabel ? (
+            <View style={styles.metaPill}>
+              <Text style={styles.metaPillText}>{`发布时间 ${publishedAtLabel}`}</Text>
+            </View>
+          ) : null}
 
           <View style={styles.versionPanel}>
             <View style={styles.versionBlock}>
@@ -120,6 +158,21 @@ export function AppUpdateModal({ visible, update, opening, onConfirm, onDismiss 
               <Text style={styles.primaryButtonText}>{opening ? '正在打开' : '立即下载'}</Text>
             </Pressable>
           </View>
+
+          {showSupportAction ? (
+            <Pressable
+              style={[styles.supportButton, supportActionLoading && styles.supportButtonDisabled]}
+              onPress={onSupportAction}
+              disabled={supportActionLoading || opening}
+            >
+              {supportActionLoading ? (
+                <ActivityIndicator size="small" color={palette.stone700} />
+              ) : null}
+              <Text style={styles.supportButtonText}>
+                {supportActionLoading ? '处理中...' : supportActionLabel}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       </View>
     </Modal>
@@ -206,6 +259,21 @@ function createStyles(palette: Palette) {
       fontSize: 14,
       lineHeight: 22,
       color: palette.stone600,
+    },
+    metaPill: {
+      alignSelf: 'flex-start',
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: palette.stone100,
+      backgroundColor: palette.surfaceWarm,
+      marginTop: -4,
+    },
+    metaPillText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: palette.stone700,
     },
     versionPanel: {
       flexDirection: 'row',
@@ -320,6 +388,26 @@ function createStyles(palette: Palette) {
       fontSize: 15,
       fontWeight: '900',
       color: palette.stone900,
+    },
+    supportButton: {
+      minHeight: 48,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: palette.stone100,
+      backgroundColor: palette.surfaceWarm,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'row',
+      gap: 8,
+      paddingHorizontal: 16,
+    },
+    supportButtonDisabled: {
+      opacity: 0.74,
+    },
+    supportButtonText: {
+      fontSize: 14,
+      fontWeight: '800',
+      color: palette.stone700,
     },
   });
 }

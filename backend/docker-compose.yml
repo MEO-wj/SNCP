@@ -41,6 +41,7 @@ services:
     ports:
       - "4420:4420"
     volumes:
+      - ../releases:/app/releases
       - sncp_recipe_uploads:/app/backend/static/uploads
     restart: unless-stopped
 

@@ -7,6 +7,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import {
   CaretRight,
   CheckCircle,
+  Database,
   Desktop,
   Fire,
   ForkKnife,
@@ -600,23 +601,32 @@ export default function SettingsScreen() {
             <Text style={styles.linkButtonText}>提醒设置</Text>
             <Text style={styles.linkArrow}>›</Text>
           </Pressable>
-          {isAdmin && (
-            <>
-              <Pressable style={styles.linkButton} onPress={() => router.push('/admin/health-rules')}>
-                <Text style={styles.linkButtonText}>后台数据管理</Text>
-                <Text style={styles.linkArrow}>›</Text>
-              </Pressable>
-              <Pressable style={styles.linkButton} onPress={() => router.push('/admin/app-update')}>
-                <Text style={styles.linkButtonText}>应用更新管理</Text>
-                <Text style={styles.linkArrow}>›</Text>
-              </Pressable>
-              <Pressable style={styles.linkButton} onPress={() => router.push('/admin/recipes')}>
-                <Text style={styles.linkButtonText}>管理食谱库</Text>
-                <Text style={styles.linkArrow}>›</Text>
-              </Pressable>
-            </>
-          )}
         </View>
+
+        {isAdmin && (
+          <View style={[styles.card, styles.featureCard]}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionTitleGroup}>
+                <View style={styles.sectionIconBadge}>
+                  <Database size={18} color={palette.orange500} weight="fill" />
+                </View>
+                <Text style={styles.cardTitle}>管理员后台</Text>
+              </View>
+            </View>
+            <Pressable style={styles.linkButton} onPress={() => router.push('/admin/health-rules')}>
+              <Text style={styles.linkButtonText}>后台数据管理</Text>
+              <Text style={styles.linkArrow}>›</Text>
+            </Pressable>
+            <Pressable style={styles.linkButton} onPress={() => router.push('/admin/app-update')}>
+              <Text style={styles.linkButtonText}>应用更新管理</Text>
+              <Text style={styles.linkArrow}>›</Text>
+            </Pressable>
+            <Pressable style={styles.linkButton} onPress={() => router.push('/admin/recipes')}>
+              <Text style={styles.linkButtonText}>管理食谱库</Text>
+              <Text style={styles.linkArrow}>›</Text>
+            </Pressable>
+          </View>
+        )}
 
         <View style={[styles.card, styles.versionCard]}>
           <View style={styles.sectionHeader}>

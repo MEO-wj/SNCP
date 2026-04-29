@@ -56,6 +56,7 @@ class Config:
         self.app_update_release_notes: list[str] = []
         self.app_update_android_apk_url: Optional[str] = None
         self.app_update_android_apk_path: Optional[Path] = None
+        self.app_update_android_release_dir: Path = Path("/app/releases")
         self.app_update_android_download_name: Optional[str] = None
         self.app_update_ios_url: Optional[str] = None
 
@@ -129,6 +130,7 @@ class Config:
             "APP_UPDATE_RELEASE_NOTES",
             "APP_UPDATE_ANDROID_APK_URL",
             "APP_UPDATE_ANDROID_APK_PATH",
+            "APP_UPDATE_ANDROID_RELEASE_DIR",
             "APP_UPDATE_ANDROID_DOWNLOAD_NAME",
             "APP_UPDATE_IOS_URL",
         ]
@@ -248,6 +250,8 @@ class Config:
             self.app_update_android_apk_url = value or None
         elif key == "APP_UPDATE_ANDROID_APK_PATH":
             self.app_update_android_apk_path = self._resolve_path(value) if value else None
+        elif key == "APP_UPDATE_ANDROID_RELEASE_DIR":
+            self.app_update_android_release_dir = self._resolve_path(value) if value else self.app_update_android_release_dir
         elif key == "APP_UPDATE_ANDROID_DOWNLOAD_NAME":
             self.app_update_android_download_name = value or None
         elif key == "APP_UPDATE_IOS_URL":

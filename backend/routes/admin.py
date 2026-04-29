@@ -221,6 +221,20 @@ def save_app_update_settings():
     return jsonify(payload), 200
 
 
+@bp.route("/app-update/revoke", methods=["POST"])
+@admin_required
+def revoke_app_update_release():
+    try:
+        payload = app_update_service.revoke_current_release(
+            updated_by=get_request_user_id(request),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover
+        return jsonify({"error": f"撤销更新失败: {exc}"}), 500
+    return jsonify(payload), 200
+
+
 @bp.route("/health_rules", methods=["POST"])
 @admin_required
 def upsert_health_rule():

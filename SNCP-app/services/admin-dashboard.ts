@@ -86,6 +86,7 @@ export type AdminAppUpdateConfig = {
   release_notes: string[];
   android_apk_url: string | null;
   android_apk_path: string | null;
+  android_release_dir: string | null;
   android_download_name: string | null;
   ios_url: string | null;
   updated_at: string | null;
@@ -102,6 +103,7 @@ export type AdminAppUpdateResolved = {
 export type AdminAppUpdateResponse = {
   config: AdminAppUpdateConfig;
   resolved: AdminAppUpdateResolved;
+  message?: string;
 };
 
 export type SaveAdminAppUpdatePayload = {
@@ -250,4 +252,21 @@ export async function saveAdminAppUpdate(token: string, payload: SaveAdminAppUpd
   }
 
   return parseAdminDashboardResponse<AdminAppUpdateResponse>(resp, '保存应用更新配置失败');
+}
+
+export async function revokeAdminAppUpdate(token: string) {
+  let resp: Response;
+  try {
+    resp = await fetch(`${getApiBaseUrl()}/admin/app-update/revoke`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...buildAuthHeaders(token),
+      },
+    });
+  } catch {
+    throw new Error('无法连接后端服务，请检查服务器网络');
+  }
+
+  return parseAdminDashboardResponse<AdminAppUpdateResponse>(resp, '撤销本次更新失败');
 }
