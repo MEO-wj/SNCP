@@ -606,6 +606,10 @@ export default function SettingsScreen() {
                 <Text style={styles.linkButtonText}>后台数据管理</Text>
                 <Text style={styles.linkArrow}>›</Text>
               </Pressable>
+              <Pressable style={styles.linkButton} onPress={() => router.push('/admin/app-update')}>
+                <Text style={styles.linkButtonText}>应用更新管理</Text>
+                <Text style={styles.linkArrow}>›</Text>
+              </Pressable>
               <Pressable style={styles.linkButton} onPress={() => router.push('/admin/recipes')}>
                 <Text style={styles.linkButtonText}>管理食谱库</Text>
                 <Text style={styles.linkArrow}>›</Text>

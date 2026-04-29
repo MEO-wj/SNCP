@@ -188,6 +188,37 @@ def init_db() -> None:
         );
         """,
         """
+        CREATE TABLE IF NOT EXISTS app_update_settings (
+            singleton_key TEXT PRIMARY KEY,
+            latest_version TEXT,
+            latest_build INT NOT NULL DEFAULT 0,
+            min_supported_build INT NOT NULL DEFAULT 0,
+            force_update BOOLEAN NOT NULL DEFAULT false,
+            published_at TIMESTAMPTZ,
+            release_notes TEXT[] NOT NULL DEFAULT '{}',
+            android_apk_url TEXT,
+            android_apk_path TEXT,
+            android_download_name TEXT,
+            ios_url TEXT,
+            updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        """,
+        "ALTER TABLE app_update_settings ADD COLUMN IF NOT EXISTS latest_version TEXT;",
+        "ALTER TABLE app_update_settings ADD COLUMN IF NOT EXISTS latest_build INT NOT NULL DEFAULT 0;",
+        "ALTER TABLE app_update_settings ADD COLUMN IF NOT EXISTS min_supported_build INT NOT NULL DEFAULT 0;",
+        "ALTER TABLE app_update_settings ADD COLUMN IF NOT EXISTS force_update BOOLEAN NOT NULL DEFAULT false;",
+        "ALTER TABLE app_update_settings ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;",
+        "ALTER TABLE app_update_settings ADD COLUMN IF NOT EXISTS release_notes TEXT[] NOT NULL DEFAULT '{}';",
+        "ALTER TABLE app_update_settings ADD COLUMN IF NOT EXISTS android_apk_url TEXT;",
+        "ALTER TABLE app_update_settings ADD COLUMN IF NOT EXISTS android_apk_path TEXT;",
+        "ALTER TABLE app_update_settings ADD COLUMN IF NOT EXISTS android_download_name TEXT;",
+        "ALTER TABLE app_update_settings ADD COLUMN IF NOT EXISTS ios_url TEXT;",
+        "ALTER TABLE app_update_settings ADD COLUMN IF NOT EXISTS updated_by UUID REFERENCES users(id) ON DELETE SET NULL;",
+        "ALTER TABLE app_update_settings ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();",
+        "ALTER TABLE app_update_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();",
+        """
         INSERT INTO ai_token_quotas (model_kind, total_tokens)
         VALUES ('text', 5000000)
         ON CONFLICT (model_kind) DO UPDATE

@@ -6,18 +6,24 @@ from uuid import UUID
 
 from flask import Blueprint, jsonify, request
 
+from backend.config import Config
+from backend.repository.app_update_repository import AppUpdateRepository
 from backend.repository.admin_dashboard_repository import AdminDashboardRepository
 from backend.repository.health_rule_repository import HealthRuleRepository
 from backend.repository.profile_repository import ProfileRepository
 from backend.repository.user_repository import NotFoundError, UserRepository
 from backend.routes.auth import admin_required, webmaster_required
+from backend.services.app_update_service import AppUpdateService
+from backend.utils.request_context import get_request_user_id
 from backend.utils.timezone_context import resolve_request_tzinfo
 
 bp = Blueprint("admin", __name__)
+config = Config()
 rule_repo = HealthRuleRepository()
 dashboard_repo = AdminDashboardRepository()
 profile_repo = ProfileRepository()
 user_repo = UserRepository()
+app_update_service = AppUpdateService(config, AppUpdateRepository())
 
 
 def _user_role_labels(roles: list[str] | None) -> list[str]:
@@ -191,6 +197,28 @@ def revoke_admin_user(user_id: str):
 def list_health_rules():
     rules = rule_repo.list_rules()
     return jsonify({"rules": rules}), 200
+
+
+@bp.route("/app-update", methods=["GET"])
+@admin_required
+def get_app_update_settings():
+    return jsonify(app_update_service.get_admin_settings_payload(external_download_url=True)), 200
+
+
+@bp.route("/app-update", methods=["PUT"])
+@admin_required
+def save_app_update_settings():
+    data = request.get_json(silent=True) or {}
+    try:
+        payload = app_update_service.save_admin_settings(
+            data,
+            updated_by=get_request_user_id(request),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover
+        return jsonify({"error": f"保存更新配置失败: {exc}"}), 500
+    return jsonify(payload), 200
 
 
 @bp.route("/health_rules", methods=["POST"])
