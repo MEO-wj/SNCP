@@ -100,7 +100,8 @@ def list_meals():
     day = _parse_date(request.args.get("date")) or get_request_local_date(request)
     start_utc, end_utc = local_day_to_utc_range(day, request_tz)
     meals = meal_repo.list_meals_by_date(user_id, start_utc, end_utc)
-    return jsonify({"date": day.isoformat(), "meals": meals}), 200
+    total_count = meal_repo.count_meals_until(user_id, datetime.now(timezone.utc))
+    return jsonify({"date": day.isoformat(), "meals": meals, "total_count": total_count}), 200
 
 
 @bp.route("/<int:meal_id>", methods=["DELETE"])

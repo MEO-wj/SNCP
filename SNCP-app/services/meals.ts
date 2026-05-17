@@ -45,7 +45,7 @@ export async function fetchMealsByDate(date: string, token: string) {
     await buildApiError(resp, '获取餐次记录失败');
   }
 
-  return parseJsonResponse<{ date: string; meals: Meal[] }>(resp, '获取餐次记录失败');
+  return parseJsonResponse<{ date: string; meals: Meal[]; total_count?: number }>(resp, '获取餐次记录失败');
 }
 
 export async function createMeal(payload: Record<string, unknown>, token: string) {

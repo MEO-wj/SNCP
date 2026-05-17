@@ -138,6 +138,7 @@ export default function MealHistoryScreen() {
   const [todayKey, setTodayKey] = useState(() => getTodayKey());
   const [selectedDate, setSelectedDate] = useState(() => getTodayKey());
   const [meals, setMeals] = useState<Meal[]>([]);
+  const [totalMealCount, setTotalMealCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState('');
   const [mealPendingDelete, setMealPendingDelete] = useState<Meal | null>(null);
@@ -147,6 +148,7 @@ export default function MealHistoryScreen() {
   const loadMeals = useCallback(async () => {
     if (!token) {
       setMeals([]);
+      setTotalMealCount(0);
       setErrorText('登录状态失效，请重新登录后再查看历史卡片。');
       return;
     }
@@ -155,10 +157,12 @@ export default function MealHistoryScreen() {
     try {
       const res = await fetchMealsByDate(selectedDate, token);
       setMeals(res.meals || []);
+      setTotalMealCount(Math.max(Number(res.total_count || 0), res.meals?.length || 0));
       setErrorText('');
     } catch (error) {
       console.error('[MealHistory] load failed', error);
       setMeals([]);
+      setTotalMealCount(0);
       setErrorText(error instanceof Error ? error.message : '获取历史饮食卡片失败');
     } finally {
       setLoading(false);
@@ -267,7 +271,7 @@ export default function MealHistoryScreen() {
               <Text style={styles.heroBadgeText}>历史卡片</Text>
             </View>
             <View style={styles.countBadge}>
-              <Text style={styles.countBadgeText}>{`总 ${meals.length} 张`}</Text>
+              <Text style={styles.countBadgeText}>{`总 ${totalMealCount} 张`}</Text>
             </View>
           </View>
           <Text style={styles.title}>历史餐次记录</Text>
