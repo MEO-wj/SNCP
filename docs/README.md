@@ -20,6 +20,7 @@ docs/
     core-data-model.md           # 核心数据模型与表结构
   api_documentation.md           # 详细接口清单
   ai-visual-recognition-skill.md # AI 识图规则补充说明
+  yolo-glm-food-recognition-integration.md # YOLO + GLM 食物识别融合方案
   food_catalog_sources.md        # 手动食物库的数据来源说明
 ```
 
@@ -97,4 +98,5 @@ Flask API (/api)
 
 - [api_documentation.md](./api_documentation.md)：详细到接口级别的清单。
 - [ai-visual-recognition-skill.md](./ai-visual-recognition-skill.md)：说明 AI 识图为什么会优先拆食材、酱汁和油脂。
+- [yolo-glm-food-recognition-integration.md](./yolo-glm-food-recognition-integration.md)：说明 YOLO 作为第二评委接入 GLM 食物识别的生产落地方案。
 - [food_catalog_sources.md](./food_catalog_sources.md)：说明前端手动食物库的营养数据从哪里来。
