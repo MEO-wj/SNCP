@@ -103,6 +103,12 @@ docker compose up --build
 - `AI_FOOD_RECOGNITION_URL`
 - `AI_NUTRITION_ANALYSIS_URL`
 - `AI_RECIPE_RECOMMEND_URL`
+- `YOLO_FOOD_ENABLED`：默认 `false`，开启后 YOLO 作为 GLM 识图的第二评委
+- `YOLO_FOOD_WEIGHT_PATH`：默认 `ai_end/models/yolo_food/cafeteria_yolo_uec.pt`
+- `YOLO_FOOD_CONF`：默认 `0.55`
+- `YOLO_FOOD_REQUIRE_REFERENCE`：默认 `false`，开启后 YOLO 无结果会直接返回空识别
+
+启用 YOLO 前需要额外安装可选依赖：`uv sync --extra yolo`。默认 `uv sync` 和 Docker 构建不会安装 YOLO 依赖，避免增加常规部署体积。
 
 ### 更新发布
 
