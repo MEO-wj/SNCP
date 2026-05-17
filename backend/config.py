@@ -46,6 +46,19 @@ class Config:
         self.zhipu_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
         self.zhipu_vision_model: str = "glm-4.6v"
         self.zhipu_text_model: str = "glm-4.7"
+        self.yolo_food_enabled: bool = False
+        self.yolo_food_weight_path: Path = self.project_root / "ai_end" / "models" / "yolo_food" / "cafeteria_yolo_uec.pt"
+        self.yolo_food_labels_path: Path = self.project_root / "ai_end" / "models" / "yolo_food" / "label_names_zh.json"
+        self.yolo_food_aliases_path: Path = self.project_root / "ai_end" / "models" / "yolo_food" / "yolo_to_catalog_aliases.json"
+        self.yolo_food_device: str = "auto"
+        self.yolo_food_img_size: int = 512
+        self.yolo_food_conf: float = 0.55
+        self.yolo_food_iou: float = 0.45
+        self.yolo_food_max_det: int = 8
+        self.yolo_food_timeout_ms: int = 1500
+        self.yolo_food_half: bool = True
+        self.yolo_food_require_reference: bool = False
+        self.yolo_food_max_image_side: int = 1280
         self.themealdb_base_url: str = "https://www.themealdb.com/api"
         self.themealdb_api_key: str = "1"
         self.app_update_latest_version: Optional[str] = None
@@ -120,6 +133,19 @@ class Config:
             "ZHIPU_BASE_URL",
             "ZHIPU_VISION_MODEL",
             "ZHIPU_TEXT_MODEL",
+            "YOLO_FOOD_ENABLED",
+            "YOLO_FOOD_WEIGHT_PATH",
+            "YOLO_FOOD_LABELS_PATH",
+            "YOLO_FOOD_ALIASES_PATH",
+            "YOLO_FOOD_DEVICE",
+            "YOLO_FOOD_IMG_SIZE",
+            "YOLO_FOOD_CONF",
+            "YOLO_FOOD_IOU",
+            "YOLO_FOOD_MAX_DET",
+            "YOLO_FOOD_TIMEOUT_MS",
+            "YOLO_FOOD_HALF",
+            "YOLO_FOOD_REQUIRE_REFERENCE",
+            "YOLO_FOOD_MAX_IMAGE_SIDE",
             "THEMEALDB_BASE_URL",
             "THEMEALDB_API_KEY",
             "APP_UPDATE_LATEST_VERSION",
@@ -226,6 +252,32 @@ class Config:
             self.zhipu_vision_model = value or self.zhipu_vision_model
         elif key == "ZHIPU_TEXT_MODEL":
             self.zhipu_text_model = value or self.zhipu_text_model
+        elif key == "YOLO_FOOD_ENABLED":
+            self.yolo_food_enabled = self._parse_bool(value, fallback=self.yolo_food_enabled)
+        elif key == "YOLO_FOOD_WEIGHT_PATH":
+            self.yolo_food_weight_path = self._resolve_path(value) if value else self.yolo_food_weight_path
+        elif key == "YOLO_FOOD_LABELS_PATH":
+            self.yolo_food_labels_path = self._resolve_path(value) if value else self.yolo_food_labels_path
+        elif key == "YOLO_FOOD_ALIASES_PATH":
+            self.yolo_food_aliases_path = self._resolve_path(value) if value else self.yolo_food_aliases_path
+        elif key == "YOLO_FOOD_DEVICE":
+            self.yolo_food_device = value or self.yolo_food_device
+        elif key == "YOLO_FOOD_IMG_SIZE":
+            self.yolo_food_img_size = self._parse_int(value, fallback=self.yolo_food_img_size, minimum=128)
+        elif key == "YOLO_FOOD_CONF":
+            self.yolo_food_conf = self._parse_float(value, fallback=self.yolo_food_conf, minimum=0.0, maximum=1.0)
+        elif key == "YOLO_FOOD_IOU":
+            self.yolo_food_iou = self._parse_float(value, fallback=self.yolo_food_iou, minimum=0.0, maximum=1.0)
+        elif key == "YOLO_FOOD_MAX_DET":
+            self.yolo_food_max_det = self._parse_int(value, fallback=self.yolo_food_max_det, minimum=1)
+        elif key == "YOLO_FOOD_TIMEOUT_MS":
+            self.yolo_food_timeout_ms = self._parse_int(value, fallback=self.yolo_food_timeout_ms, minimum=100)
+        elif key == "YOLO_FOOD_HALF":
+            self.yolo_food_half = self._parse_bool(value, fallback=self.yolo_food_half)
+        elif key == "YOLO_FOOD_REQUIRE_REFERENCE":
+            self.yolo_food_require_reference = self._parse_bool(value, fallback=self.yolo_food_require_reference)
+        elif key == "YOLO_FOOD_MAX_IMAGE_SIDE":
+            self.yolo_food_max_image_side = self._parse_int(value, fallback=self.yolo_food_max_image_side, minimum=320)
         elif key == "THEMEALDB_BASE_URL":
             self.themealdb_base_url = value or self.themealdb_base_url
         elif key == "THEMEALDB_API_KEY":
@@ -272,6 +324,18 @@ class Config:
         except ValueError:
             return fallback
         if minimum is not None and value < minimum:
+            return fallback
+        return value
+
+    @staticmethod
+    def _parse_float(raw: str, fallback: float, minimum: float | None = None, maximum: float | None = None) -> float:
+        try:
+            value = float(raw)
+        except ValueError:
+            return fallback
+        if minimum is not None and value < minimum:
+            return fallback
+        if maximum is not None and value > maximum:
             return fallback
         return value
 

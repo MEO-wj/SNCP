@@ -18,3 +18,10 @@ dependencies = [
     "redis>=7.1.0",
     "requests>=2.32.5",
 ]
+
+[project.optional-dependencies]
+yolo = [
+    "numpy>=1.26",
+    "torch>=2.0",
+    "ultralytics>=8.0",
+]
