@@ -17,6 +17,7 @@ from ai_end.services.food_catalog_service import (
     build_local_hint_matches,
     get_catalog_prompt_lines,
     match_food_entry,
+    normalize_food_text,
 )
 from ai_end.skills.recipe_recommendation_skill import build_recipe_recommendation_messages
 from ai_end.skills.recognition_skill import build_visual_recognition_messages
@@ -33,6 +34,8 @@ class AIService:
 
     def __init__(self, config: Config | None = None) -> None:
         self.config = config or Config()
+        self._yolo_food_service: Any | None = None
+        self._yolo_aliases: dict[str, list[str]] | None = None
 
     def recognize_foods(
         self,
@@ -40,6 +43,10 @@ class AIService:
         image_url: str | None = None,
         hint_text: str | None = None,
     ) -> dict[str, Any]:
+        yolo_reference = self._detect_with_yolo(image_base64=image_base64, image_url=image_url)
+        if self._should_block_on_yolo_reference(yolo_reference, has_image=bool(image_base64 or image_url)):
+            return self._build_yolo_blocked_result(yolo_reference)
+
         if self.config.ai_food_recognition_url:
             payload = {"image_base64": image_base64, "image_url": image_url, "hint_text": hint_text}
             headers = {"Content-Type": "application/json"}
@@ -55,45 +62,236 @@ class AIService:
             response.raise_for_status()
             data = response.json()
             normalized = self._normalize_recognition_items(data.get("items") or data.get("foods") or [])
-            return {
-                "items": normalized,
-                "provider": "remote",
-                "message": data.get("message"),
-                "scene_summary": data.get("scene_summary"),
-            }
+            return self._with_yolo_verification(
+                {
+                    "items": normalized,
+                    "provider": "remote",
+                    "message": data.get("message"),
+                    "scene_summary": data.get("scene_summary"),
+                },
+                yolo_reference,
+            )
 
         if self.config.zhipu_api_key and (image_base64 or image_url):
             try:
-                return self._recognize_with_zhipu(image_base64=image_base64, image_url=image_url, hint_text=hint_text)
+                return self._recognize_with_zhipu(
+                    image_base64=image_base64,
+                    image_url=image_url,
+                    hint_text=hint_text,
+                    yolo_reference=yolo_reference,
+                )
             except Exception as exc:  # pragma: no cover
                 local_items = build_local_hint_matches(hint_text)
                 if local_items:
-                    return {
-                        "items": local_items,
+                    return self._with_yolo_verification(
+                        {
+                            "items": local_items,
+                            "provider": "local",
+                            "message": f"智谱视觉识别暂时不可用，已根据提示词给出近似匹配结果: {exc}",
+                            "scene_summary": hint_text or "",
+                        },
+                        yolo_reference,
+                    )
+                return self._with_yolo_verification(
+                    {
+                        "items": [],
                         "provider": "local",
-                        "message": f"智谱视觉识别暂时不可用，已根据提示词给出近似匹配结果: {exc}",
-                        "scene_summary": hint_text or "",
-                    }
-                return {
-                    "items": [],
-                    "provider": "local",
-                    "message": f"智谱视觉识别暂时不可用，请稍后重试: {exc}",
-                }
+                        "message": f"智谱视觉识别暂时不可用，请稍后重试: {exc}",
+                    },
+                    yolo_reference,
+                )
 
         local_items = build_local_hint_matches(hint_text)
         if local_items:
-            return {
-                "items": local_items,
+            return self._with_yolo_verification(
+                {
+                    "items": local_items,
+                    "provider": "local",
+                    "message": "当前未配置视觉模型，已根据提示词给出近似匹配结果。",
+                    "scene_summary": hint_text or "",
+                },
+                yolo_reference,
+            )
+
+        return self._with_yolo_verification(
+            {
+                "items": [],
                 "provider": "local",
-                "message": "当前未配置视觉模型，已根据提示词给出近似匹配结果。",
-                "scene_summary": hint_text or "",
+                "message": "未配置食物识别服务。可设置 ZHIPU_API_KEY 启用图片识别，或先输入提示词做本地匹配。",
+            },
+            yolo_reference,
+        )
+
+    def _detect_with_yolo(self, *, image_base64: str | None, image_url: str | None) -> dict[str, Any] | None:
+        if not self.config.yolo_food_enabled:
+            return None
+        if self._yolo_food_service is None:
+            from ai_end.services.yolo_food_service import YOLOFoodService
+
+            self._yolo_food_service = YOLOFoodService(self.config)
+        return self._yolo_food_service.detect(image_base64=image_base64, image_url=image_url)
+
+    def _should_block_on_yolo_reference(self, yolo_reference: dict[str, Any] | None, *, has_image: bool) -> bool:
+        if not has_image or not self.config.yolo_food_require_reference:
+            return False
+        return isinstance(yolo_reference, dict) and yolo_reference.get("status") == "no_result"
+
+    def _build_yolo_blocked_result(self, yolo_reference: dict[str, Any] | None) -> dict[str, Any]:
+        result = {
+            "items": [],
+            "provider": "zhipu+yolo",
+            "message": "YOLO 未检测到可确认菜品，已按严格双验证策略返回空结果。",
+            "scene_summary": "",
+        }
+        return self._with_yolo_verification(result, yolo_reference, blocked=True)
+
+    def _with_yolo_verification(
+        self,
+        result: dict[str, Any],
+        yolo_reference: dict[str, Any] | None,
+        *,
+        blocked: bool = False,
+    ) -> dict[str, Any]:
+        if not isinstance(yolo_reference, dict):
+            return result
+        result["verification"] = self._compare_glm_with_yolo(result.get("items") or [], yolo_reference, blocked=blocked)
+        result["_meta_yolo"] = yolo_reference
+        return result
+
+    def _compare_glm_with_yolo(
+        self,
+        items: list[dict[str, Any]],
+        yolo_reference: dict[str, Any],
+        *,
+        blocked: bool = False,
+    ) -> dict[str, Any]:
+        status = str(yolo_reference.get("status") or "unknown")
+        detections = yolo_reference.get("detections") if isinstance(yolo_reference.get("detections"), list) else []
+        yolo_items = [
+            {
+                "name": detection.get("name_zh") or detection.get("label"),
+                "confidence": detection.get("confidence"),
+            }
+            for detection in detections[: self.config.yolo_food_max_det]
+        ]
+
+        if blocked:
+            return {
+                "yolo_status": status,
+                "agreement": "blocked",
+                "warnings": ["严格双验证模式要求 YOLO 提供有效参考，本次已返回空结果。"],
+                "yolo_items": yolo_items,
             }
 
-        return {
-            "items": [],
-            "provider": "local",
-            "message": "未配置食物识别服务。可设置 ZHIPU_API_KEY 启用图片识别，或先输入提示词做本地匹配。",
+        if status == "no_result":
+            return {
+                "yolo_status": "no_result",
+                "agreement": "unknown",
+                "warnings": ["YOLO 未返回可用参考，最终结果仅由主视觉模型判断。"],
+                "yolo_items": [],
+            }
+        if status in {"unavailable", "timeout", "error"}:
+            return {
+                "yolo_status": status,
+                "agreement": "unknown",
+                "warnings": ["YOLO 第二评委本次不可用，未参与最终校验。"],
+                "yolo_items": yolo_items,
+            }
+        if status != "matched" or not detections:
+            return {
+                "yolo_status": status,
+                "agreement": "unknown",
+                "warnings": [],
+                "yolo_items": yolo_items,
+            }
+
+        glm_ids = {str(item.get("canonical_name") or "").strip() for item in items if item.get("canonical_name")}
+        glm_texts = {
+            normalize_food_text(str(item.get(key) or ""))
+            for item in items
+            for key in ("display_name", "food_name", "name", "canonical_name")
+            if item.get(key)
         }
+
+        matched: list[str] = []
+        yolo_only: list[str] = []
+        for detection in detections:
+            detection_name = str(detection.get("name_zh") or detection.get("label") or "")
+            candidate_ids, candidate_texts = self._yolo_candidate_keys(detection)
+            if glm_ids.intersection(candidate_ids) or self._has_text_overlap(glm_texts, candidate_texts):
+                matched.append(detection_name)
+            else:
+                yolo_only.append(detection_name)
+
+        warnings: list[str] = []
+        if yolo_only:
+            warnings.append("YOLO 检测到但主模型未采纳: " + "、".join(yolo_only[:4]))
+        if items and not matched:
+            warnings.append("YOLO 高置信结果与主模型输出未形成明确一致。")
+        if not items:
+            warnings.append("YOLO 有参考结果，但主模型未输出可落库食物项。")
+
+        if matched and not yolo_only:
+            agreement = "agree"
+        elif matched:
+            agreement = "partial"
+        elif items:
+            agreement = "conflict"
+        else:
+            agreement = "partial"
+
+        return {
+            "yolo_status": "matched",
+            "agreement": agreement,
+            "warnings": warnings,
+            "yolo_items": yolo_items,
+        }
+
+    def _yolo_candidate_keys(self, detection: dict[str, Any]) -> tuple[set[str], set[str]]:
+        label = str(detection.get("label") or "")
+        names = [label, str(detection.get("name_zh") or "")]
+        names.extend(self._load_yolo_aliases().get(label, []))
+
+        candidate_ids: set[str] = set()
+        candidate_texts: set[str] = set()
+        for name in names:
+            normalized = normalize_food_text(name)
+            if normalized:
+                candidate_texts.add(normalized)
+            entry = match_food_entry(name)
+            if entry:
+                candidate_ids.add(str(entry["id"]))
+                candidate_texts.add(normalize_food_text(str(entry.get("name") or "")))
+                for alias in entry.get("aliases") or []:
+                    candidate_texts.add(normalize_food_text(str(alias)))
+        return candidate_ids, {text for text in candidate_texts if text}
+
+    def _load_yolo_aliases(self) -> dict[str, list[str]]:
+        if self._yolo_aliases is not None:
+            return self._yolo_aliases
+        aliases_path = self.config.yolo_food_aliases_path
+        if not aliases_path.exists():
+            self._yolo_aliases = {}
+            return self._yolo_aliases
+        try:
+            raw = json.loads(aliases_path.read_text(encoding="utf-8"))
+        except Exception:
+            logger.warning("failed to load YOLO aliases from %s", aliases_path)
+            raw = {}
+        self._yolo_aliases = {
+            str(key): [str(value) for value in values if str(value).strip()]
+            for key, values in raw.items()
+            if isinstance(values, list)
+        }
+        return self._yolo_aliases
+
+    @staticmethod
+    def _has_text_overlap(left: set[str], right: set[str]) -> bool:
+        for left_text in left:
+            for right_text in right:
+                if left_text and right_text and (left_text in right_text or right_text in left_text):
+                    return True
+        return False
 
     def extract_recipe_draft(
         self,
@@ -622,6 +820,7 @@ class AIService:
         image_base64: str | None,
         image_url: str | None,
         hint_text: str | None,
+        yolo_reference: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         data_url = image_url or self._build_image_data_url(image_base64)
         if not data_url:
@@ -635,6 +834,7 @@ class AIService:
             catalog_lines=get_catalog_prompt_lines(),
             image_url=data_url,
             hint_text=hint_text,
+            yolo_reference=yolo_reference,
         )
         data = self._zhipu_chat_completion(
             messages,
@@ -1522,6 +1722,7 @@ class AIService:
         image_base64: str | None,
         image_url: str | None,
         hint_text: str | None,
+        yolo_reference: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         data_url = image_url or self._build_image_data_url(image_base64)
         if not data_url:
@@ -1535,6 +1736,7 @@ class AIService:
             catalog_lines=get_catalog_prompt_lines(),
             image_url=data_url,
             hint_text=hint_text,
+            yolo_reference=yolo_reference,
         )
         data = self._zhipu_chat_completion(
             messages,
@@ -1548,6 +1750,7 @@ class AIService:
             "scene_summary": data.get("scene_summary"),
             "message": "已通过智谱视觉模型完成识别，请在保存前确认份量。",
         }
+        result = self._with_yolo_verification(result, yolo_reference)
         return self._copy_ai_meta(result, data)
 
     def _analyze_with_zhipu(self, payload: dict[str, Any]) -> dict[str, Any]:

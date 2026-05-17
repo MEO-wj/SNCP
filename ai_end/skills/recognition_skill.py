@@ -61,13 +61,58 @@ VISUAL_RECOGNITION_SKILL_SPEC = dedent(
 ).strip()
 
 
+def _bbox_region(bbox: list[float] | None) -> str:
+    if not bbox or len(bbox) != 4:
+        return "位置未知"
+    center_x = (float(bbox[0]) + float(bbox[2])) / 2
+    center_y = (float(bbox[1]) + float(bbox[3])) / 2
+    horizontal = "左侧" if center_x < 0.33 else "右侧" if center_x > 0.66 else "中部"
+    vertical = "上方" if center_y < 0.33 else "下方" if center_y > 0.66 else "中部"
+    if horizontal == "中部" and vertical == "中部":
+        return "画面中部"
+    return f"画面{vertical}{horizontal}"
+
+
+def _format_yolo_reference(yolo_reference: dict[str, Any] | None) -> str:
+    if not isinstance(yolo_reference, dict):
+        return ""
+
+    status = str(yolo_reference.get("status") or "").strip()
+    detections = yolo_reference.get("detections") if isinstance(yolo_reference.get("detections"), list) else []
+    if status == "matched" and detections:
+        lines = [
+            "\nYOLO 第二评委参考结果如下，可能正确也可能错误，只能作为辅助线索：",
+        ]
+        for index, item in enumerate(detections[:8], 1):
+            name = item.get("name_zh") or item.get("label") or "未知菜品"
+            confidence = float(item.get("confidence") or 0)
+            lines.append(f"{index}. {name}，置信度 {confidence:.3f}，位于{_bbox_region(item.get('bbox'))}。")
+        lines.extend(
+            [
+                "请以图片可见事实为主做最终判断：",
+                "- 如果采纳 YOLO 结果，需要确认它在图片中确实可见。",
+                "- 如果拒绝 YOLO 结果，需要在 notes 或 scene_summary 中说明不确定性。",
+                "- 不要为了迎合 YOLO 添加看不清或目录中不存在的食物。",
+            ]
+        )
+        return "\n".join(lines)
+
+    if status == "no_result":
+        return "\nYOLO 第二评委未检测到超过阈值的菜品。请不要因为 YOLO 为空而编造食物；仍以图片可见事实为准。"
+    if status in {"unavailable", "timeout", "error"}:
+        return "\nYOLO 第二评委本次不可用或超时。请忽略该辅助信号，继续以图片可见事实为准。"
+    return ""
+
+
 def build_visual_recognition_messages(
     *,
     catalog_lines: list[str],
     image_url: str,
     hint_text: str | None,
+    yolo_reference: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     hint_block = f"\n用户补充提示：{hint_text.strip()}" if hint_text and hint_text.strip() else ""
+    yolo_block = _format_yolo_reference(yolo_reference)
     catalog_block = "\n".join(catalog_lines)
     user_text = (
         "请根据下面的识图技能严格完成识别。\n"
@@ -79,6 +124,7 @@ def build_visual_recognition_messages(
         "2. 不要输出目录中不存在的 canonical_name。\n"
         "3. 如果用户提示和图片冲突，以图片可见事实为主，在 notes 中说明不确定性。\n"
         "4. 识别带汁、炒制、煎炸、沙拉、甜品、饮品时，必须主动检查是否需要补酱料、糖或食用油。\n"
+        f"{yolo_block}\n"
         f"{hint_block}\n\n"
         "可用目录如下：\n"
         f"{catalog_block}"

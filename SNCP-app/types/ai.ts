@@ -21,6 +21,14 @@ export type AiRecognitionResult = {
   provider: string;
   message?: string;
   scene_summary?: string;
+  verification?: AiRecognitionVerification;
+};
+
+export type AiRecognitionVerification = {
+  yolo_status: 'matched' | 'no_result' | 'disabled' | 'unavailable' | 'timeout' | 'error' | string;
+  agreement: 'agree' | 'partial' | 'conflict' | 'unknown' | 'blocked' | string;
+  warnings: string[];
+  yolo_items?: { name?: string | null; confidence?: number | null }[];
 };
 
 export type AiNutritionInsight = {
