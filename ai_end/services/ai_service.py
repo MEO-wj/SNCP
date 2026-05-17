@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 ZHIPU_RETRYABLE_ERROR_CODES = {"1302", "1305"}
 ZHIPU_RETRY_DELAYS_SECONDS = (1.0, 2.0)
 RECOMMEND_AI_TIMEOUT_SECONDS = 12
+RECOMMENDATION_POOL_LIMIT = 16
+RECOMMENDATION_AI_CANDIDATE_LIMIT = 32
 
 
 class AIService:
@@ -413,20 +415,29 @@ class AIService:
 
     def _build_ai_recommendation_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         context = payload.get("context") or {}
+        recommendation_limit = self._recommendation_limit(payload)
         return {
             "profile": self._compact_recommendation_profile(payload.get("profile") or {}),
             "goals": self._compact_recommendation_goals(payload.get("goals") or {}),
             "rules": self._compact_recommendation_rules(payload.get("rules") or [], payload),
+            "recent_meals": self._compact_recommendation_meals(payload.get("recent_meals") or []),
             "recipes": self._recommendation_candidates_for_ai(payload),
             "context": {
                 "keyword": context.get("keyword"),
                 "tag": context.get("tag"),
-                "exclude_names": context.get("exclude_names") or [],
-                "refresh_round": context.get("refresh_round") or 0,
+                "recommendation_limit": recommendation_limit,
                 "library_only": True,
                 "prefer_external": False,
             },
         }
+
+    def _recommendation_limit(self, payload: dict[str, Any]) -> int:
+        context = payload.get("context") or {}
+        try:
+            raw_limit = int(context.get("recommendation_limit") or RECOMMENDATION_POOL_LIMIT)
+        except (TypeError, ValueError):
+            raw_limit = RECOMMENDATION_POOL_LIMIT
+        return max(4, min(raw_limit, RECOMMENDATION_POOL_LIMIT))
 
     @staticmethod
     def _compact_recommendation_profile(profile: dict[str, Any]) -> dict[str, Any]:
@@ -451,6 +462,31 @@ class AIService:
             "sugar_max",
         ]
         return {key: goals.get(key) for key in keys if goals.get(key) is not None}
+
+    @staticmethod
+    def _compact_recommendation_meals(meals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        compacted: list[dict[str, Any]] = []
+        for meal in meals[:12]:
+            items = meal.get("items") or []
+            if not isinstance(items, list):
+                items = []
+            compacted.append(
+                {
+                    "meal_type": meal.get("meal_type"),
+                    "eaten_at": str(meal.get("eaten_at") or ""),
+                    "foods": [
+                        {
+                            "name": item.get("food_name"),
+                            "category": item.get("food_category"),
+                            "weight_g": item.get("weight_g"),
+                            "nutrition": item.get("nutrition") or {},
+                        }
+                        for item in items[:8]
+                        if isinstance(item, dict)
+                    ],
+                }
+            )
+        return compacted
 
     @staticmethod
     def _compact_recommendation_rules(rules: list[dict[str, Any]], payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -514,6 +550,7 @@ class AIService:
         return finalized
 
     def _finalize_library_only_recipe_items(self, items: list[dict[str, Any]], payload: dict[str, Any]) -> list[dict[str, Any]]:
+        recommendation_limit = self._recommendation_limit(payload)
         library_candidates = [
             recipe
             for recipe in payload.get("recipes") or []
@@ -521,7 +558,6 @@ class AIService:
             and recipe.get("source") != "external"
             and not self._is_recipe_blocked_by_constraints(recipe, payload)
         ]
-        library_candidates = self._apply_recommendation_refresh(library_candidates, payload)
         by_name: dict[str, dict[str, Any]] = {}
         for recipe in library_candidates:
             normalized_name = self._normalize_recipe_name(recipe.get("name"))
@@ -564,7 +600,7 @@ class AIService:
                     "source": "library",
                 }
             )
-            if len(selected) >= 4:
+            if len(selected) >= recommendation_limit:
                 break
 
         if selected:
@@ -588,7 +624,7 @@ class AIService:
                 "reason": "该食谱来自服务器食谱库，可结合当前健康档案作为候选。",
                 "source": "library",
             }
-            for recipe in library_candidates[:4]
+            for recipe in library_candidates[:recommendation_limit]
         ]
 
     @classmethod
@@ -1012,7 +1048,7 @@ class AIService:
         data = self._zhipu_chat_completion(
             messages,
             model=self.config.zhipu_text_model,
-            max_tokens=500,
+            max_tokens=1600,
             response_format_type="json_object",
             retry_on_rate_limit=False,
         )
@@ -1028,10 +1064,10 @@ class AIService:
             candidate = by_id.get(str(item.get("recipe_id"))) if item.get("recipe_id") is not None else None
             candidate = candidate or by_name.get(self._normalize_recipe_name(item.get("name")), {})
             merged.append({**candidate, **item})
-        selected = self._apply_recommendation_refresh(merged, payload)
-        return self._ensure_recommendation_source_mix(selected or candidates, payload)
+        return self._ensure_recommendation_source_mix(merged or candidates, payload)
 
     def _recommend_with_rules(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        recommendation_limit = self._recommendation_limit(payload)
         profile = payload.get("profile") or {}
         context = payload.get("context") or {}
         rules = payload.get("rules") or []
@@ -1123,10 +1159,7 @@ class AIService:
             seen_names.add(normalized_name)
             deduped_ranked.append(item)
 
-        top = self._apply_recommendation_refresh(
-            [self._strip_private_fields(item) for item in deduped_ranked if item["_score"] >= -1],
-            payload,
-        )[:4]
+        top = [self._strip_private_fields(item) for item in deduped_ranked if item["_score"] >= -1][:recommendation_limit]
         if top:
             return self._ensure_recommendation_source_mix(top, payload)
         return self._ensure_recommendation_source_mix(self._fallback_recipe_templates(health_tags), payload)
@@ -1144,10 +1177,10 @@ class AIService:
                 continue
             candidates.append(recipe)
             seen_names.add(normalized_name)
-            if len(candidates) >= 12:
+            if len(candidates) >= RECOMMENDATION_AI_CANDIDATE_LIMIT:
                 break
 
-        return [self._compact_recommendation_recipe(item) for item in candidates[:12]]
+        return [self._compact_recommendation_recipe(item) for item in candidates[:RECOMMENDATION_AI_CANDIDATE_LIMIT]]
 
     @staticmethod
     def _compact_recommendation_recipe(recipe: dict[str, Any]) -> dict[str, Any]:
@@ -1200,7 +1233,8 @@ class AIService:
         items: list[dict[str, Any]],
         payload: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        filtered = self._apply_recommendation_refresh(items, payload)
+        recommendation_limit = self._recommendation_limit(payload)
+        filtered = list(items)
         if not filtered:
             return []
 
@@ -1209,9 +1243,9 @@ class AIService:
         current_external_count = sum(1 for item in filtered if item.get("source") == "external")
         external_candidates = self._external_recipe_candidates(payload)
         if current_external_count >= required_external_count or not external_candidates:
-            return filtered[:4]
+            return filtered[:recommendation_limit]
 
-        mixed = list(filtered[:4])
+        mixed = list(filtered[:recommendation_limit])
         existing_names = {self._normalize_recipe_name(item.get("name")) for item in filtered}
         for external_item in external_candidates:
             if current_external_count >= required_external_count:
@@ -1219,7 +1253,7 @@ class AIService:
             external_name = self._normalize_recipe_name(external_item.get("name"))
             if not external_name or external_name in existing_names:
                 continue
-            if len(mixed) < 4:
+            if len(mixed) < recommendation_limit:
                 mixed.append(external_item)
             else:
                 replace_index = next(
@@ -1233,7 +1267,7 @@ class AIService:
                 mixed[replace_index] = external_item
             existing_names.add(external_name)
             current_external_count += 1
-        return mixed[:4]
+        return mixed[:recommendation_limit]
 
     def _external_recipe_candidates(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         external_items = [
@@ -1241,8 +1275,7 @@ class AIService:
             for recipe in payload.get("recipes") or []
             if recipe.get("source") == "external" and not self._is_recipe_blocked_by_constraints(recipe, payload)
         ]
-        refreshed = self._apply_recommendation_refresh(external_items, payload)
-        return sorted(refreshed, key=lambda item: bool(item.get("cover_url")), reverse=True)
+        return sorted(external_items, key=lambda item: bool(item.get("cover_url")), reverse=True)
 
     @staticmethod
     def _is_hint_summary_text(summary: str) -> bool:
@@ -1296,45 +1329,6 @@ class AIService:
             ]
         ).lower()
         return any(keyword and keyword in searchable_text for keyword in blocked_keywords)
-
-    def _apply_recommendation_refresh(self, items: list[dict[str, Any]], payload: dict[str, Any]) -> list[dict[str, Any]]:
-        if not items:
-            return []
-
-        filtered = list(items)
-        excluded_names, refresh_round = self._get_recommendation_refresh_context(payload)
-        if excluded_names:
-            without_excluded = [
-                item
-                for item in filtered
-                if self._normalize_recipe_name(item.get("name")) not in excluded_names
-            ]
-            if without_excluded:
-                filtered = without_excluded
-
-        if refresh_round > 0 and len(filtered) > 1:
-            offset = refresh_round % len(filtered)
-            if offset:
-                filtered = filtered[offset:] + filtered[:offset]
-
-        return filtered
-
-    def _get_recommendation_refresh_context(self, payload: dict[str, Any]) -> tuple[set[str], int]:
-        context = payload.get("context") or {}
-        raw_excluded = context.get("exclude_names") or []
-        excluded_names = {
-            self._normalize_recipe_name(item)
-            for item in raw_excluded
-            if self._normalize_recipe_name(item)
-        } if isinstance(raw_excluded, list) else set()
-
-        raw_refresh_round = context.get("refresh_round")
-        try:
-            refresh_round = max(int(raw_refresh_round), 0)
-        except (TypeError, ValueError):
-            refresh_round = 0
-
-        return excluded_names, refresh_round
 
     def _fallback_recipe_templates(self, health_tags: set[str]) -> list[dict[str, Any]]:
         templates = [
@@ -1790,7 +1784,7 @@ class AIService:
             messages,
             model=self.config.zhipu_text_model,
             model_kind="text",
-            max_tokens=500,
+            max_tokens=1600,
             response_format_type="json_object",
             retry_on_rate_limit=False,
             timeout_seconds=RECOMMEND_AI_TIMEOUT_SECONDS,
@@ -1807,8 +1801,7 @@ class AIService:
             candidate = by_id.get(str(item.get("recipe_id"))) if item.get("recipe_id") is not None else None
             candidate = candidate or by_name.get(self._normalize_recipe_name(item.get("name")), {})
             merged.append({**candidate, **item})
-        selected = self._apply_recommendation_refresh(merged, payload)
-        return self._copy_ai_meta({"items": self._ensure_recommendation_source_mix(selected or candidates, payload)}, data)
+        return self._copy_ai_meta({"items": self._ensure_recommendation_source_mix(merged or candidates, payload)}, data)
 
     def recommend_recipes(self, payload: dict[str, Any]) -> dict[str, Any]:
         rule_items = self._recommend_with_rules(payload)

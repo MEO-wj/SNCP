@@ -129,6 +129,54 @@ class MealRepository:
 
         return [{**meal, "items": items_by_meal.get(meal["id"], [])} for meal in meals]
 
+    def count_meals_until(self, user_id: UUID, end_utc: datetime) -> int:
+        with db_session() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM meals
+                WHERE user_id = %s AND eaten_at < %s
+                """,
+                (user_id, end_utc),
+            )
+            row = cur.fetchone()
+        return int(row.get("total") or 0) if row else 0
+
+    def list_recent_meals(self, user_id: UUID, limit: int = 12) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(int(limit or 12), 30))
+        with db_session() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, meal_type, eaten_at, client_request_id, note, created_at
+                FROM meals
+                WHERE user_id = %s
+                ORDER BY eaten_at DESC, id DESC
+                LIMIT %s
+                """,
+                (user_id, safe_limit),
+            )
+            meals = cur.fetchall()
+            if not meals:
+                return []
+
+            meal_ids = [row["id"] for row in meals]
+            cur.execute(
+                """
+                SELECT id, meal_id, food_name, food_category, weight_g, source, nutrition, created_at
+                FROM meal_items
+                WHERE meal_id = ANY(%s)
+                ORDER BY id ASC
+                """,
+                (meal_ids,),
+            )
+            items = cur.fetchall()
+
+        items_by_meal: dict[int, list[dict[str, Any]]] = {}
+        for item in items:
+            items_by_meal.setdefault(item["meal_id"], []).append(item)
+
+        return [{**meal, "items": items_by_meal.get(meal["id"], [])} for meal in meals]
+
     def list_meals_by_range(self, user_id: UUID, start_utc: datetime, end_utc: datetime) -> list[dict[str, Any]]:
         with db_session() as conn, conn.cursor() as cur:
             cur.execute(

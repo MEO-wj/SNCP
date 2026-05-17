@@ -10,6 +10,7 @@ from flask import Blueprint, jsonify, request
 from ai_end.services.ai_service import AIService
 from backend.repository.admin_dashboard_repository import AdminDashboardRepository
 from backend.repository.health_rule_repository import HealthRuleRepository
+from backend.repository.meal_repository import MealRepository
 from backend.repository.profile_repository import ProfileRepository
 from backend.repository.recipe_repository import RecipeRepository
 from backend.routes.auth import login_required
@@ -41,6 +42,7 @@ ai_service = AIService()
 profile_repo = ProfileRepository()
 rule_repo = HealthRuleRepository()
 recipe_repo = RecipeRepository()
+meal_repo = MealRepository()
 dashboard_repo = AdminDashboardRepository()
 
 
@@ -67,6 +69,11 @@ def _coerce_bool_flag(value, *, default: bool) -> bool:
 def _normalize_recommend_request_payload(data: dict) -> dict:
     normalized = dict(data)
     normalized["ai_enhance"] = _coerce_bool_flag(data.get("ai_enhance"), default=True)
+    try:
+        recommendation_limit = int(data.get("recommendation_limit") or 16)
+    except (TypeError, ValueError):
+        recommendation_limit = 16
+    normalized["recommendation_limit"] = max(4, min(recommendation_limit, 16))
     return normalized
 
 
@@ -314,6 +321,7 @@ def recommend_recipes():
 
     profile = profile_repo.get_profile(user_id) if user_id else None
     goals = profile_repo.get_goals(user_id) if user_id else None
+    recent_meals = meal_repo.list_recent_meals(user_id, limit=12) if user_id else []
     rules = rule_repo.list_rules()
     local_recipes = _normalize_recipe_cover_items(
         recipe_repo.list_recipes(
@@ -337,6 +345,7 @@ def recommend_recipes():
         "prefer_external": False,
         "prefer_local_library": True,
         "allow_server_library": True,
+        "recommendation_limit": data.get("recommendation_limit") or 16,
     }
     recommendation_recipes = _prefer_local_recipes_by_name([*local_recipes, *server_recipes])
     result = ai_service.recommend_recipes(
@@ -345,6 +354,7 @@ def recommend_recipes():
             "goals": goals or default_goals(),
             "rules": rules,
             "recipes": recommendation_recipes,
+            "recent_meals": recent_meals,
             "context": context,
         }
     )

@@ -10,7 +10,7 @@ from flask import current_app
 DEFAULT_VERSION = 0
 DASHBOARD_TTL_SECONDS = 60 * 60 * 6
 RECOMMEND_TTL_SECONDS = 60 * 60 * 6
-RECOMMEND_STRATEGY_VERSION = "library-only-ai-v3"
+RECOMMEND_STRATEGY_VERSION = "library-only-ai-top16-v1"
 GLOBAL_RECIPE_LIBRARY_VERSION_KEY = "nutrition:recipe-library:global-version"
 
 
@@ -149,8 +149,7 @@ def _normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "strategy": RECOMMEND_STRATEGY_VERSION,
         "keyword": payload.get("keyword"),
         "tag": payload.get("tag"),
-        "exclude_names": payload.get("exclude_names") if isinstance(payload.get("exclude_names"), list) else [],
-        "refresh_round": payload.get("refresh_round") or 0,
+        "recommendation_limit": payload.get("recommendation_limit") or 16,
         "ai_enhance": ai_enhance,
         "prefer_external": False,
         "library_only": True,

@@ -27,16 +27,18 @@ import {
   writeRecommendExperienceCache,
   type RecommendExperienceCache,
 } from '@/services/nutrition-cache';
+import { primeRecommendationExperience } from '@/services/nutrition-prime';
 import { subscribeNutritionRefresh } from '@/services/nutrition-refresh';
 import type { Recipe } from '@/types/recipe';
 
 type LoadOptions = {
-  excludeNames?: string[];
   refreshRound?: number;
   silent?: boolean;
 };
 
 const RECOMMEND_CACHE_FRESH_MS = 15 * 60 * 1000;
+const RECOMMENDATION_POOL_LIMIT = 16;
+const RECOMMENDATION_DISPLAY_COUNT = 4;
 
 function getRecipeMetaText(recipe: RecipePost): string {
   const tagText = recipe.tags.slice(0, 2).join('、');
@@ -45,6 +47,16 @@ function getRecipeMetaText(recipe: RecipePost): string {
 
 function keepLibraryPosts(posts: RecipePost[]): RecipePost[] {
   return posts.filter((post) => post.source === 'library');
+}
+
+function pickVisibleRecommendations(posts: RecipePost[], refreshRound: number): RecipePost[] {
+  if (posts.length <= RECOMMENDATION_DISPLAY_COUNT) {
+    return posts;
+  }
+
+  const offset = (refreshRound * RECOMMENDATION_DISPLAY_COUNT) % posts.length;
+  const rotated = [...posts.slice(offset), ...posts.slice(0, offset)];
+  return rotated.slice(0, RECOMMENDATION_DISPLAY_COUNT);
 }
 
 function isFreshRecommendCache(cached: RecommendExperienceCache | null): boolean {
@@ -207,6 +219,7 @@ export default function RecommendScreen() {
     setProvider(cached.provider);
     setMessage(cached.message);
     setNoticeText('');
+    setRefreshRound(0);
     return cachedRecipes.length > 0 || cachedRecommendations.length > 0;
   }, []);
 
@@ -218,6 +231,10 @@ export default function RecommendScreen() {
   const recommendationHelperText = useMemo(
     () => getRecommendationHelperText(provider, message),
     [message, provider],
+  );
+  const visibleRecommendationPosts = useMemo(
+    () => pickVisibleRecommendations(recommendationPosts, refreshRound),
+    [recommendationPosts, refreshRound],
   );
 
   const handleOpenRecipe = useCallback(
@@ -247,8 +264,7 @@ export default function RecommendScreen() {
         const aiResult = await recommendRecipes(token, {
           ai_enhance: true,
           keyword: nextKeyword || undefined,
-          exclude_names: options?.excludeNames?.length ? options.excludeNames : undefined,
-          refresh_round: options?.refreshRound ?? 0,
+          recommendation_limit: RECOMMENDATION_POOL_LIMIT,
         })
           .then((value) => ({ status: 'fulfilled' as const, value }))
           .catch((reason) => ({ status: 'rejected' as const, reason }));
@@ -305,6 +321,7 @@ export default function RecommendScreen() {
         setRecommendationPosts(nextRecommendationPosts);
         setProvider(nextProvider);
         setMessage(nextMessage);
+        setRefreshRound(options?.refreshRound ?? 0);
         await syncExperienceCache(nextKeyword, basePosts, nextRecommendationPosts, nextProvider, nextMessage);
 
         if (!options?.silent || nextErrorText) {
@@ -332,7 +349,9 @@ export default function RecommendScreen() {
       }
 
       if (applyCachedState(cached)) {
-        void load('', { refreshRound: 0, silent: true });
+        if (!isFreshRecommendCache(cached)) {
+          void load('', { refreshRound: 0, silent: true });
+        }
         return;
       }
 
@@ -345,10 +364,19 @@ export default function RecommendScreen() {
   }, [applyCachedState, load, token]);
 
   useEffect(() => {
+    if (!token) {
+      return;
+    }
+
     return subscribeNutritionRefresh(() => {
-      void load(keyword, { refreshRound, silent: true });
+      void primeRecommendationExperience(token, keyword).then((cached) => {
+        if (cached && applyCachedState(cached)) {
+          return;
+        }
+        void load(keyword, { refreshRound: 0, silent: true });
+      });
     });
-  }, [keyword, load, refreshRound]);
+  }, [applyCachedState, keyword, load, token]);
 
   const handleSearch = useCallback(() => {
     setRefreshRound(0);
@@ -357,7 +385,6 @@ export default function RecommendScreen() {
       const cached = await readRecommendExperienceCache(keyword);
       const hasCache = applyCachedState(cached);
       if (hasCache && isFreshRecommendCache(cached)) {
-        void load(keyword, { refreshRound: 0, silent: true });
         return;
       }
       void load(keyword, { refreshRound: 0, silent: hasCache });
@@ -365,11 +392,16 @@ export default function RecommendScreen() {
   }, [applyCachedState, keyword, load]);
 
   const handleRefreshRecommendations = useCallback(() => {
+    if (recommendationPosts.length > 0) {
+      setRefreshRound((current) => current + 1);
+      setNoticeText('');
+      return;
+    }
+
     const nextRound = refreshRound + 1;
     setRefreshRound(nextRound);
     setNoticeText('');
     void load(keyword, {
-      excludeNames: recommendationPosts.map((item) => item.name),
       refreshRound: nextRound,
     });
   }, [keyword, load, recommendationPosts, refreshRound]);
@@ -524,17 +556,17 @@ export default function RecommendScreen() {
               ) : (
                 <ArrowsClockwise size={14} color={palette.orange500} weight="bold" />
               )}
-              <Text style={styles.refreshButtonText}>{loading ? '刷新中' : '刷新推荐'}</Text>
+              <Text style={styles.refreshButtonText}>{loading ? '加载中' : '换一批'}</Text>
             </Pressable>
           </View>
 
           <Text style={styles.helperText}>{recommendationHelperText}</Text>
 
-          {recommendationPosts.length === 0 ? (
+          {visibleRecommendationPosts.length === 0 ? (
             <Text style={styles.emptyText}>当前没有匹配的推荐，可以换个关键词再试试。</Text>
           ) : (
             <View style={styles.recipeGrid}>
-              {recommendationPosts.map((recipe) => renderRecipeCard(recipe, 'recommend'))}
+              {visibleRecommendationPosts.map((recipe) => renderRecipeCard(recipe, 'recommend'))}
             </View>
           )}
         </View>
